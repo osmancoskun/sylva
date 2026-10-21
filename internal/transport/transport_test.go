@@ -67,7 +67,10 @@ func startTestServer(t *testing.T) (config.ServerConfig, config.ClientConfig, *t
 	clientCfg.ServerURL = fmt.Sprintf("%s://%s", clientCfg.Scheme, ln.Addr().String())
 	clientCfg.CachePath = filepath.Join(t.TempDir(), "cache.db")
 
-	httpClient := transport.NewClient(clientCfg)
+	httpClient, err := transport.NewClient(clientCfg)
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
 	t.Cleanup(httpClient.Close)
 	return srvCfg, clientCfg, httpClient, cancel
 }

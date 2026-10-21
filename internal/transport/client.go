@@ -51,16 +51,37 @@ type Client struct {
 }
 
 // NewClient constructs a new transport Client from the given ClientConfig.
-func NewClient(cfg config.ClientConfig) *Client {
+func NewClient(cfg config.ClientConfig) (*Client, error) {
+	httpClient, err := newHTTPClient(cfg)
+	if err != nil {
+		return nil, err
+	}
 	baseURL := strings.TrimRight(cfg.ServerURL, "/")
 	return &Client{
 		baseURL:      baseURL,
 		apiPrefix:    strings.TrimRight(cfg.APIPrefix, "/"),
 		maxBodyBytes: cfg.MaxBodyBytes,
-		httpClient: &http.Client{
-			Timeout: cfg.Timeout,
-		},
+		httpClient:   httpClient,
+	}, nil
+}
+
+func newHTTPClient(cfg config.ClientConfig) (*http.Client, error) {
+	c := &http.Client{Timeout: cfg.Timeout}
+	if !cfg.EnableMTLS {
+		return c, nil
 	}
+	tlsCfg, err := clientTLSConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
+	base, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return nil, fmt.Errorf("http default transport is not *http.Transport")
+	}
+	tr := base.Clone()
+	tr.TLSClientConfig = tlsCfg
+	c.Transport = tr
+	return c, nil
 }
 
 func (c *Client) apiURL(path string) string {

@@ -44,9 +44,13 @@ type Vault struct {
 
 // Open constructs a Vault client. Unlock must be called before secret operations.
 func Open(cfg config.ClientConfig) (*Vault, error) {
+	remote, err := transport.NewClient(cfg)
+	if err != nil {
+		return nil, err
+	}
 	v := &Vault{
 		cfg:    cfg,
-		remote: transport.NewClient(cfg),
+		remote: remote,
 	}
 	if cfg.CacheEnabled {
 		cache, err := storage.OpenSQLite(cfg.CachePath, cfg.SQLiteBusyTimeout)

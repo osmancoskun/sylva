@@ -5,6 +5,7 @@ package transport
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -77,6 +78,15 @@ func NewServer(cfg config.ServerConfig, store storage.Store, logger *slog.Logger
 	return s
 }
 
+func (s *Server) listenTLS(ln net.Listener) (net.Listener, error) {
+	tlsCfg, err := serverTLSConfig(s.cfg)
+	if err != nil {
+		return nil, err
+	}
+	s.httpServer.TLSConfig = tlsCfg
+	return tls.NewListener(ln, tlsCfg), nil
+}
+
 // Start begins listening and serving requests until the provided context is canceled.
 func (s *Server) Start(ctx context.Context) error {
 	ln, err := net.Listen("tcp", s.cfg.ListenAddr)
@@ -90,6 +100,19 @@ func (s *Server) Start(ctx context.Context) error {
 // Serve accepts incoming connections on the provided listener and performs a
 // graceful shutdown when ctx is canceled.
 func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
+	if s.cfg.EnableTailscale {
+		return fmt.Errorf("tailscale is not implemented")
+	}
+
+	serveLn := ln
+	if s.cfg.EnableMTLS {
+		tlsLn, err := s.listenTLS(ln)
+		if err != nil {
+			return err
+		}
+		serveLn = tlsLn
+	}
+
 	errCh := make(chan error, 1)
 
 	go func() {
@@ -99,7 +122,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 			slog.Bool("mtls", s.cfg.EnableMTLS),
 			slog.Bool("tailscale", s.cfg.EnableTailscale),
 		)
-		if err := s.httpServer.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := s.httpServer.Serve(serveLn); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
 		close(errCh)

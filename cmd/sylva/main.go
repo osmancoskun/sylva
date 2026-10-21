@@ -116,7 +116,11 @@ func main() {
 }
 
 func runPing(cfg config.ClientConfig) error {
-	client := transport.NewClient(cfg)
+	client, err := transport.NewClient(cfg)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.Timeout)
 	defer cancel()
