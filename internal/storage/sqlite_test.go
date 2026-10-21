@@ -109,6 +109,27 @@ func TestSQLitePutGetListDeleteAndMetadata(t *testing.T) {
 		t.Fatalf("expected conflict on duplicate id, got %v", err)
 	}
 
+	item.Login.Password = "updated-secret"
+	updated, err := vault.Seal(masterKey, item, rec.Version+1)
+	if err != nil {
+		t.Fatalf("seal update: %v", err)
+	}
+	updated.ID = rec.ID
+	if err := store.Update(ctx, updated); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	gotUpdated, err := store.GetByID(ctx, rec.ID)
+	if err != nil {
+		t.Fatalf("get after update: %v", err)
+	}
+	unsealedUpdated, err := vault.Unseal(masterKey, gotUpdated)
+	if err != nil {
+		t.Fatalf("unseal updated: %v", err)
+	}
+	if unsealedUpdated.Login.Password != "updated-secret" {
+		t.Fatalf("updated password %q", unsealedUpdated.Login.Password)
+	}
+
 	conflict := *rec
 	conflict.ID = "rec-2"
 	if err := store.Put(ctx, &conflict); !errors.Is(err, storage.ErrConflict) {

@@ -111,6 +111,51 @@ func (s *SQLiteStore) Put(ctx context.Context, rec *vault.EncryptedRecord) error
 	return nil
 }
 
+// Update replaces an existing record by ID. Missing IDs return ErrNotFound.
+func (s *SQLiteStore) Update(ctx context.Context, rec *vault.EncryptedRecord) error {
+	if rec == nil {
+		return errors.New("encrypted record cannot be nil")
+	}
+
+	if _, err := s.GetByID(ctx, rec.ID); err != nil {
+		return err
+	}
+
+	existing, err := s.GetByBlindIndex(ctx, rec.BlindIndex)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	if err == nil && existing.ID != rec.ID {
+		return fmt.Errorf("%w: record already exists", ErrConflict)
+	}
+
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE records SET
+			type=?,
+			blind_index=?,
+			parent_blind_index=?,
+			nonce=?,
+			ciphertext=?,
+			version=?,
+			updated_at=?
+		WHERE id=?
+	`, string(rec.Type), rec.BlindIndex, rec.ParentBlindIndex, rec.Envelope.Nonce, rec.Envelope.Ciphertext, rec.Version, rec.UpdatedAt.UTC().Format(time.RFC3339Nano), rec.ID)
+	if err != nil {
+		if isUniqueConstraint(err) {
+			return fmt.Errorf("%w: record already exists", ErrConflict)
+		}
+		return fmt.Errorf("update record %s: %w", rec.ID, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func isUniqueConstraint(err error) bool {
 	if err == nil {
 		return false

@@ -26,6 +26,7 @@ var (
 type Store interface {
 	Close() error
 	Put(ctx context.Context, rec *vault.EncryptedRecord) error // insert-only; existing id or blind index returns ErrConflict
+	Update(ctx context.Context, rec *vault.EncryptedRecord) error
 	GetByID(ctx context.Context, id string) (*vault.EncryptedRecord, error)
 	GetByBlindIndex(ctx context.Context, blindIndex string) (*vault.EncryptedRecord, error)
 	List(ctx context.Context, secretType vault.SecretType) ([]*vault.EncryptedRecord, error)
