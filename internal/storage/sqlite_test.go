@@ -105,6 +105,10 @@ func TestSQLitePutGetListDeleteAndMetadata(t *testing.T) {
 		t.Fatalf("expected 1 login record, got %d", len(listed))
 	}
 
+	if err := store.Put(ctx, rec); !errors.Is(err, storage.ErrConflict) {
+		t.Fatalf("expected conflict on duplicate id, got %v", err)
+	}
+
 	conflict := *rec
 	conflict.ID = "rec-2"
 	if err := store.Put(ctx, &conflict); !errors.Is(err, storage.ErrConflict) {

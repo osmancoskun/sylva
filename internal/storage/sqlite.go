@@ -79,37 +79,44 @@ func (s *SQLiteStore) Close() error {
 	return s.db.Close()
 }
 
-// Put inserts or updates an encrypted record by ID.
+// Put inserts an encrypted record. Existing IDs or blind indexes return ErrConflict.
 func (s *SQLiteStore) Put(ctx context.Context, rec *vault.EncryptedRecord) error {
 	if rec == nil {
 		return errors.New("encrypted record cannot be nil")
 	}
 
-	existing, err := s.GetByBlindIndex(ctx, rec.BlindIndex)
-	if err != nil && !errors.Is(err, ErrNotFound) {
+	if _, err := s.GetByID(ctx, rec.ID); err == nil {
+		return fmt.Errorf("%w: record already exists", ErrConflict)
+	} else if !errors.Is(err, ErrNotFound) {
 		return err
 	}
-	if err == nil && existing.ID != rec.ID {
-		return fmt.Errorf("%w: blind index already owned by %s", ErrConflict, existing.ID)
+
+	if _, err := s.GetByBlindIndex(ctx, rec.BlindIndex); err == nil {
+		return fmt.Errorf("%w: record already exists", ErrConflict)
+	} else if !errors.Is(err, ErrNotFound) {
+		return err
 	}
 
-	_, err = s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO records (
 			id, type, blind_index, parent_blind_index, nonce, ciphertext, version, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET
-			type=excluded.type,
-			blind_index=excluded.blind_index,
-			parent_blind_index=excluded.parent_blind_index,
-			nonce=excluded.nonce,
-			ciphertext=excluded.ciphertext,
-			version=excluded.version,
-			updated_at=excluded.updated_at
 	`, rec.ID, string(rec.Type), rec.BlindIndex, rec.ParentBlindIndex, rec.Envelope.Nonce, rec.Envelope.Ciphertext, rec.Version, rec.CreatedAt.UTC().Format(time.RFC3339Nano), rec.UpdatedAt.UTC().Format(time.RFC3339Nano))
 	if err != nil {
+		if isUniqueConstraint(err) {
+			return fmt.Errorf("%w: record already exists", ErrConflict)
+		}
 		return fmt.Errorf("put record %s: %w", rec.ID, err)
 	}
 	return nil
+}
+
+func isUniqueConstraint(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "unique") || strings.Contains(msg, "constraint")
 }
 
 // GetByID loads a record by its client-generated identifier.
