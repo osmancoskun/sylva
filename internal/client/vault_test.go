@@ -1,0 +1,101 @@
+package client_test
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"net"
+	"path/filepath"
+	"testing"
+
+	sylva "github.com/osman/sylva/internal/client"
+	"github.com/osman/sylva/internal/config"
+	"github.com/osman/sylva/internal/leakcheck"
+	"github.com/osman/sylva/internal/storage"
+	"github.com/osman/sylva/internal/transport"
+)
+
+func TestMain(m *testing.M) {
+	leakcheck.Verify(m)
+}
+
+func TestLoginSetGetInheritanceThroughServer(t *testing.T) {
+	envPath := filepath.Join("..", "..", ".env.example")
+	srvCfg, err := config.LoadServerConfig(envPath)
+	if err != nil {
+		t.Fatalf("load server config: %v", err)
+	}
+	clientCfg, err := config.LoadClientConfig(envPath)
+	if err != nil {
+		t.Fatalf("load client config: %v", err)
+	}
+
+	srvCfg.ListenAddr = net.JoinHostPort(srvCfg.Host, "0")
+	srvCfg.DBPath = filepath.Join(t.TempDir(), "sylvad.db")
+	store, err := storage.OpenSQLite(srvCfg.DBPath, srvCfg.SQLiteBusyTimeout)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer store.Close()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := transport.NewServer(srvCfg, store, logger)
+	ln, err := net.Listen("tcp", srvCfg.ListenAddr)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.Serve(ctx, ln) }()
+	defer func() {
+		cancel()
+		<-errCh
+	}()
+
+	clientCfg.ServerURL = fmt.Sprintf("%s://%s", clientCfg.Scheme, ln.Addr().String())
+	clientCfg.CachePath = filepath.Join(t.TempDir(), "cache.db")
+	clientCfg.MasterPassphrase = "client-integration-passphrase"
+
+	v, err := sylva.Open(clientCfg)
+	if err != nil {
+		t.Fatalf("open vault: %v", err)
+	}
+	defer v.Close()
+
+	if err := v.Unlock(ctx, clientCfg.MasterPassphrase); err != nil {
+		t.Fatalf("unlock: %v", err)
+	}
+
+	if _, err := v.LoginSet(ctx, "company.com", "osman", "company-secret", false, false); err != nil {
+		t.Fatalf("set company.com: %v", err)
+	}
+
+	_, err = v.LoginSet(ctx, "mail.company.com", "", "", false, false)
+	if !errors.Is(err, sylva.ErrParentExists) {
+		t.Fatalf("expected ErrParentExists, got %v", err)
+	}
+
+	if _, err := v.LoginSet(ctx, "mail.company.com", "", "", true, false); err != nil {
+		t.Fatalf("set mail.company.com inherit: %v", err)
+	}
+
+	res, err := v.LoginGet(ctx, "mail.company.com", false)
+	if err != nil {
+		t.Fatalf("get mail.company.com: %v", err)
+	}
+	if !res.Inherited || res.Item.Login.Password != "company-secret" {
+		t.Fatalf("expected inherited password, got %+v", res)
+	}
+
+	cascaded, err := v.LoginGet(ctx, "dev.mail.company.com", true)
+	if err != nil {
+		t.Fatalf("cascade get: %v", err)
+	}
+	if cascaded.Item.Login.Password != "company-secret" {
+		t.Fatalf("expected cascaded password, got %q", cascaded.Item.Login.Password)
+	}
+}
