@@ -18,7 +18,7 @@ The client derives a master key from your passphrase and a salt. The salt lives 
 
 Logins sit in a domain tree. `mail.company.com` can inherit `company.com` instead of storing another password.
 
-`sylvad` is the HTTP server and SQLite store. `sylva` is the CLI and exits when the command finishes. `sylva agent` keeps the session key and clipboard after that. `get` starts the agent if it is not running.
+`sylvad` is the HTTP server and SQLite store. `sylva` is the CLI and exits when the command finishes. `sylva agent` keeps the session key and clipboard after that. `get` starts the agent if it is not running. Optional TLS 1.3 mTLS: [docs/mtls.md](docs/mtls.md).
 
 ## Use
 
@@ -54,6 +54,4 @@ Config is `.env`. Tests: `make docker-test` / `make docker-smoke`.
 
 ## Todo
 
-- mTLS (flags only)
 - Tailscale (flags only)
-- Docs beyond this README
