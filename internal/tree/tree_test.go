@@ -5,9 +5,14 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/osman/sylva/internal/leakcheck"
 	"github.com/osman/sylva/internal/tree"
 	"github.com/osman/sylva/internal/vault"
 )
+
+func TestMain(m *testing.M) {
+	leakcheck.Verify(m)
+}
 
 func TestNormalizeDomainAndAncestors(t *testing.T) {
 	norm, err := tree.NormalizeDomain("https://Dev.API.Company.com:8443/v1/login")
@@ -48,8 +53,8 @@ func TestHierarchicalDomainInheritanceAndOverride(t *testing.T) {
 
 	// 2. When adding mail.company.com, detect nearest parent company.com
 	ancestor, found, err := dt.FindNearestAncestor("mail.company.com")
-	if err != nil || !found {
-		t.Fatalf("expected parent domain company.com to be found, got found=%v err=%v", found, err)
+	if err != nil || !found || ancestor == nil || ancestor.Login == nil {
+		t.Fatalf("expected parent domain company.com to be found, got found=%v ancestor=%v err=%v", found, ancestor, err)
 	}
 	if ancestor.Login.Domain != "company.com" {
 		t.Errorf("expected nearest ancestor 'company.com', got %q", ancestor.Login.Domain)

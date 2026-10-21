@@ -6,8 +6,13 @@ import (
 
 	"github.com/osman/sylva/internal/config"
 	"github.com/osman/sylva/internal/crypto"
+	"github.com/osman/sylva/internal/leakcheck"
 	"github.com/osman/sylva/internal/vault"
 )
+
+func TestMain(m *testing.M) {
+	leakcheck.Verify(m)
+}
 
 func deriveTestMasterKey(t *testing.T) []byte {
 	t.Helper()

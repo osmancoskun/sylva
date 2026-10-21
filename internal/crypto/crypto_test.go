@@ -8,7 +8,12 @@ import (
 
 	"github.com/osman/sylva/internal/config"
 	"github.com/osman/sylva/internal/crypto"
+	"github.com/osman/sylva/internal/leakcheck"
 )
+
+func TestMain(m *testing.M) {
+	leakcheck.Verify(m)
+}
 
 func loadTestCryptoConfig(t *testing.T) config.CryptoConfig {
 	t.Helper()

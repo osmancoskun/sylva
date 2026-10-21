@@ -5,7 +5,9 @@ services:
       target: test
       args:
         GO_IMAGE: ${SYLVA_DOCKER_GO_IMAGE}
+        TEST_IMAGE: ${SYLVA_DOCKER_TEST_IMAGE}
         RUNTIME_IMAGE: ${SYLVA_DOCKER_RUNTIME_IMAGE}
+        GOTOOLCHAIN: ${SYLVA_GOTOOLCHAIN}
     env_file:
       - .env
 
@@ -15,11 +17,15 @@ services:
       target: sylvad
       args:
         GO_IMAGE: ${SYLVA_DOCKER_GO_IMAGE}
+        TEST_IMAGE: ${SYLVA_DOCKER_TEST_IMAGE}
         RUNTIME_IMAGE: ${SYLVA_DOCKER_RUNTIME_IMAGE}
     env_file:
       - .env
     environment:
       SYLVA_HOST: 0.0.0.0
+      SYLVA_SERVER_DB_PATH: /data/sylvad.db
+    volumes:
+      - sylvad-data:/data
     ports:
       - "${SYLVA_HOST}:${SYLVA_PORT}:${SYLVA_PORT}"
     networks:
@@ -31,11 +37,14 @@ services:
       target: sylva
       args:
         GO_IMAGE: ${SYLVA_DOCKER_GO_IMAGE}
+        TEST_IMAGE: ${SYLVA_DOCKER_TEST_IMAGE}
         RUNTIME_IMAGE: ${SYLVA_DOCKER_RUNTIME_IMAGE}
     env_file:
       - .env
     environment:
       SYLVA_HOST: sylvad
+      SYLVA_CLIENT_CACHE_PATH: /tmp/sylva-cache.db
+      SYLVA_CLIPBOARD_BACKEND: memory
     depends_on:
       - sylvad
     networks:
@@ -44,3 +53,6 @@ services:
 networks:
   sylva-net:
     driver: bridge
+
+volumes:
+  sylvad-data:

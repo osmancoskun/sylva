@@ -174,7 +174,7 @@ func (t *DomainTree) Resolve(domain string, allowCascade bool) (*Resolution, err
 	}
 
 	exactNode := t.findExactNode(norm)
-	if exactNode != nil && exactNode.item != nil {
+	if exactNode != nil && exactNode.item != nil && exactNode.item.Login != nil {
 		if !exactNode.item.Login.InheritFromParent {
 			return &Resolution{
 				RequestedDomain: norm,
@@ -187,6 +187,9 @@ func (t *DomainTree) Resolve(domain string, allowCascade bool) (*Resolution, err
 		resolvedItem, err := t.resolveInheritedItem(exactNode.item, make(map[string]bool))
 		if err != nil {
 			return nil, err
+		}
+		if resolvedItem == nil || resolvedItem.Login == nil {
+			return nil, ErrDomainNotFound
 		}
 
 		// Merge the subdomain's own metadata (e.g. username if customized) with the parent's password.
@@ -214,13 +217,16 @@ func (t *DomainTree) Resolve(domain string, allowCascade bool) (*Resolution, err
 	if err != nil {
 		return nil, err
 	}
-	if !found {
+	if !found || ancestorItem == nil {
 		return nil, ErrDomainNotFound
 	}
 
 	resolvedItem, err := t.resolveInheritedItem(ancestorItem, make(map[string]bool))
 	if err != nil {
 		return nil, err
+	}
+	if resolvedItem == nil || resolvedItem.Login == nil {
+		return nil, ErrDomainNotFound
 	}
 
 	return &Resolution{
@@ -273,7 +279,7 @@ func (t *DomainTree) resolveInheritedItem(item *vault.SecretItem, visited map[st
 	if err != nil {
 		return nil, err
 	}
-	if !found {
+	if !found || ancestor == nil {
 		return nil, ErrDomainNotFound
 	}
 
