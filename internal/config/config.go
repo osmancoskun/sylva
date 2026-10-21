@@ -30,39 +30,61 @@ type CryptoConfig struct {
 
 // ServerConfig holds runtime configuration for the sylvad server daemon.
 type ServerConfig struct {
-	ServiceName       string
-	Version           string
-	LogLevel          slog.Level
-	Host              string
-	Port              string
-	ListenAddr        string
-	ReadHeaderTimeout time.Duration
-	ReadTimeout       time.Duration
-	WriteTimeout      time.Duration
-	IdleTimeout       time.Duration
-	ShutdownTimeout   time.Duration
-	EnableMTLS        bool
-	CACertPath        string
-	ServerCertPath    string
-	ServerKeyPath     string
-	EnableTailscale   bool
-	TailscaleNode     string
+	ServiceName          string
+	Version              string
+	LogLevel             slog.Level
+	Host                 string
+	Port                 string
+	ListenAddr           string
+	APIPrefix            string
+	DBPath               string
+	MaxBodyBytes         int64
+	SQLiteBusyTimeout    time.Duration
+	RecordInitialVersion int
+	ReadHeaderTimeout    time.Duration
+	ReadTimeout          time.Duration
+	WriteTimeout         time.Duration
+	IdleTimeout          time.Duration
+	ShutdownTimeout      time.Duration
+	EnableMTLS           bool
+	CACertPath           string
+	ServerCertPath       string
+	ServerKeyPath        string
+	EnableTailscale      bool
+	TailscaleNode        string
 }
 
 // ClientConfig holds runtime configuration for the sylva CLI client.
 type ClientConfig struct {
-	Version          string
-	Scheme           string
-	Host             string
-	Port             string
-	ServerURL        string
-	Timeout          time.Duration
-	MaxResponseBytes int64
-	EnableMTLS       bool
-	CACertPath       string
-	ClientCertPath   string
-	ClientKeyPath    string
-	Crypto           CryptoConfig
+	Version              string
+	Scheme               string
+	Host                 string
+	Port                 string
+	ServerURL            string
+	APIPrefix            string
+	Timeout              time.Duration
+	MaxBodyBytes         int64
+	CacheEnabled         bool
+	CachePath            string
+	SQLiteBusyTimeout    time.Duration
+	RecordInitialVersion int
+	MasterPassphrase     string
+	ClipboardClearAfter  time.Duration
+	ClipboardBackend     string
+	ClipboardFile        string
+	AgentEnabled         bool
+	AgentSocketPath      string
+	AgentLogPath         string
+	LogLevel             slog.Level
+	KeyringEnabled       bool
+	KeyringService       string
+	KeyringUser          string
+	ConfigPath           string
+	EnableMTLS           bool
+	CACertPath           string
+	ClientCertPath       string
+	ClientKeyPath        string
+	Crypto               CryptoConfig
 }
 
 // LoadDotEnv reads key=value pairs from the specified file path and populates
@@ -222,25 +244,50 @@ func LoadServerConfig(envPath string) (ServerConfig, error) {
 	if err != nil {
 		return ServerConfig{}, err
 	}
+	apiPrefix, err := requireEnv("SYLVA_API_PREFIX")
+	if err != nil {
+		return ServerConfig{}, err
+	}
+	dbPath, err := requireEnv("SYLVA_SERVER_DB_PATH")
+	if err != nil {
+		return ServerConfig{}, err
+	}
+	maxBodyBytes, err := requireInt64Env("SYLVA_MAX_BODY_BYTES")
+	if err != nil {
+		return ServerConfig{}, err
+	}
+	sqliteBusyTimeout, err := requireDurationEnv("SYLVA_SQLITE_BUSY_TIMEOUT")
+	if err != nil {
+		return ServerConfig{}, err
+	}
+	recordInitialVersion, err := requireIntEnv("SYLVA_RECORD_INITIAL_VERSION")
+	if err != nil {
+		return ServerConfig{}, err
+	}
 
 	return ServerConfig{
-		ServiceName:       serviceName,
-		Version:           version,
-		LogLevel:          logLevel,
-		Host:              host,
-		Port:              port,
-		ListenAddr:        listenAddr,
-		ReadHeaderTimeout: readHeaderTimeout,
-		ReadTimeout:       readTimeout,
-		WriteTimeout:      writeTimeout,
-		IdleTimeout:       idleTimeout,
-		ShutdownTimeout:   shutdownTimeout,
-		EnableMTLS:        enableMTLS,
-		CACertPath:        os.Getenv("SYLVA_CA_CERT_PATH"),
-		ServerCertPath:    os.Getenv("SYLVA_SERVER_CERT_PATH"),
-		ServerKeyPath:     os.Getenv("SYLVA_SERVER_KEY_PATH"),
-		EnableTailscale:   enableTailscale,
-		TailscaleNode:     os.Getenv("SYLVA_TAILSCALE_NODE"),
+		ServiceName:          serviceName,
+		Version:              version,
+		LogLevel:             logLevel,
+		Host:                 host,
+		Port:                 port,
+		ListenAddr:           listenAddr,
+		APIPrefix:            strings.TrimRight(apiPrefix, "/"),
+		DBPath:               dbPath,
+		MaxBodyBytes:         maxBodyBytes,
+		SQLiteBusyTimeout:    sqliteBusyTimeout,
+		RecordInitialVersion: recordInitialVersion,
+		ReadHeaderTimeout:    readHeaderTimeout,
+		ReadTimeout:          readTimeout,
+		WriteTimeout:         writeTimeout,
+		IdleTimeout:          idleTimeout,
+		ShutdownTimeout:      shutdownTimeout,
+		EnableMTLS:           enableMTLS,
+		CACertPath:           os.Getenv("SYLVA_CA_CERT_PATH"),
+		ServerCertPath:       os.Getenv("SYLVA_SERVER_CERT_PATH"),
+		ServerKeyPath:        os.Getenv("SYLVA_SERVER_KEY_PATH"),
+		EnableTailscale:      enableTailscale,
+		TailscaleNode:        os.Getenv("SYLVA_TAILSCALE_NODE"),
 	}, nil
 }
 
@@ -279,11 +326,71 @@ func LoadClientConfig(envPath string) (ClientConfig, error) {
 	if err != nil {
 		return ClientConfig{}, err
 	}
-	maxRespBytes, err := requireInt64Env("SYLVA_CLIENT_MAX_RESPONSE_BYTES")
+	maxBodyBytes, err := requireInt64Env("SYLVA_MAX_BODY_BYTES")
 	if err != nil {
 		return ClientConfig{}, err
 	}
 	enableMTLS, err := requireBoolEnv("SYLVA_MTLS_ENABLED")
+	if err != nil {
+		return ClientConfig{}, err
+	}
+	apiPrefix, err := requireEnv("SYLVA_API_PREFIX")
+	if err != nil {
+		return ClientConfig{}, err
+	}
+	cacheEnabled, err := requireBoolEnv("SYLVA_CLIENT_CACHE_ENABLED")
+	if err != nil {
+		return ClientConfig{}, err
+	}
+	cachePath, err := requireEnv("SYLVA_CLIENT_CACHE_PATH")
+	if err != nil {
+		return ClientConfig{}, err
+	}
+	recordInitialVersion, err := requireIntEnv("SYLVA_RECORD_INITIAL_VERSION")
+	if err != nil {
+		return ClientConfig{}, err
+	}
+	sqliteBusyTimeout, err := requireDurationEnv("SYLVA_SQLITE_BUSY_TIMEOUT")
+	if err != nil {
+		return ClientConfig{}, err
+	}
+	clipboardClearAfter, err := requireDurationEnv("SYLVA_CLIPBOARD_CLEAR_AFTER")
+	if err != nil {
+		return ClientConfig{}, err
+	}
+	clipboardBackend, err := requireEnv("SYLVA_CLIPBOARD_BACKEND")
+	if err != nil {
+		return ClientConfig{}, err
+	}
+	agentEnabled, err := requireBoolEnv("SYLVA_AGENT_ENABLED")
+	if err != nil {
+		return ClientConfig{}, err
+	}
+	agentSocketPath, err := requireEnv("SYLVA_AGENT_SOCKET_PATH")
+	if err != nil {
+		return ClientConfig{}, err
+	}
+	agentLogPath, err := requireEnv("SYLVA_AGENT_LOG_PATH")
+	if err != nil {
+		return ClientConfig{}, err
+	}
+	logLevelStr, err := requireEnv("SYLVA_LOG_LEVEL")
+	if err != nil {
+		return ClientConfig{}, err
+	}
+	logLevel, err := parseLogLevel(logLevelStr)
+	if err != nil {
+		return ClientConfig{}, err
+	}
+	keyringEnabled, err := requireBoolEnv("SYLVA_KEYRING_ENABLED")
+	if err != nil {
+		return ClientConfig{}, err
+	}
+	keyringService, err := requireEnv("SYLVA_KEYRING_SERVICE")
+	if err != nil {
+		return ClientConfig{}, err
+	}
+	keyringUser, err := requireEnv("SYLVA_KEYRING_USER")
 	if err != nil {
 		return ClientConfig{}, err
 	}
@@ -293,18 +400,35 @@ func LoadClientConfig(envPath string) (ClientConfig, error) {
 	}
 
 	return ClientConfig{
-		Version:          version,
-		Scheme:           scheme,
-		Host:             host,
-		Port:             port,
-		ServerURL:        serverURL,
-		Timeout:          timeout,
-		MaxResponseBytes: maxRespBytes,
-		EnableMTLS:       enableMTLS,
-		CACertPath:       os.Getenv("SYLVA_CA_CERT_PATH"),
-		ClientCertPath:   os.Getenv("SYLVA_CLIENT_CERT_PATH"),
-		ClientKeyPath:    os.Getenv("SYLVA_CLIENT_KEY_PATH"),
-		Crypto:           cryptoCfg,
+		Version:              version,
+		Scheme:               scheme,
+		Host:                 host,
+		Port:                 port,
+		ServerURL:            serverURL,
+		APIPrefix:            strings.TrimRight(apiPrefix, "/"),
+		Timeout:              timeout,
+		MaxBodyBytes:         maxBodyBytes,
+		CacheEnabled:         cacheEnabled,
+		CachePath:            cachePath,
+		SQLiteBusyTimeout:    sqliteBusyTimeout,
+		RecordInitialVersion: recordInitialVersion,
+		MasterPassphrase:     os.Getenv("SYLVA_MASTER_PASSPHRASE"),
+		ClipboardClearAfter:  clipboardClearAfter,
+		ClipboardBackend:     strings.ToLower(strings.TrimSpace(clipboardBackend)),
+		ClipboardFile:        os.Getenv("SYLVA_CLIPBOARD_FILE"),
+		AgentEnabled:         agentEnabled,
+		AgentSocketPath:      agentSocketPath,
+		AgentLogPath:         agentLogPath,
+		LogLevel:             logLevel,
+		KeyringEnabled:       keyringEnabled,
+		KeyringService:       keyringService,
+		KeyringUser:          keyringUser,
+		ConfigPath:           envPath,
+		EnableMTLS:           enableMTLS,
+		CACertPath:           os.Getenv("SYLVA_CA_CERT_PATH"),
+		ClientCertPath:       os.Getenv("SYLVA_CLIENT_CERT_PATH"),
+		ClientKeyPath:        os.Getenv("SYLVA_CLIENT_KEY_PATH"),
+		Crypto:               cryptoCfg,
 	}, nil
 }
 

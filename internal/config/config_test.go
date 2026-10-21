@@ -6,7 +6,12 @@ import (
 	"testing"
 
 	"github.com/osman/sylva/internal/config"
+	"github.com/osman/sylva/internal/leakcheck"
 )
+
+func TestMain(m *testing.M) {
+	leakcheck.Verify(m)
+}
 
 func TestLoadConfigFromEnvFile(t *testing.T) {
 	envPath := filepath.Join("..", "..", ".env.example")
@@ -25,6 +30,12 @@ func TestLoadConfigFromEnvFile(t *testing.T) {
 	}
 	if cliCfg.ServerURL == "" {
 		t.Fatalf("expected ServerURL to be constructed from env file")
+	}
+	if cliCfg.ClipboardClearAfter <= 0 || cliCfg.AgentSocketPath == "" {
+		t.Fatalf("expected clipboard and agent settings from env file")
+	}
+	if cliCfg.ConfigPath != envPath {
+		t.Fatalf("ConfigPath = %q, want %q", cliCfg.ConfigPath, envPath)
 	}
 }
 
