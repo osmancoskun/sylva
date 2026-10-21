@@ -2,7 +2,7 @@ BINARY_CLI := sylva
 BINARY_DAEMON := sylvad
 BUILD_DIR := bin
 GO := go
-GOFLAGS := -v
+GOFLAGS :=
 
 .PHONY: all build build-cli build-daemon test lint clean
 

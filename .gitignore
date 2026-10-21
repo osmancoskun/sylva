@@ -6,8 +6,8 @@
 *.dylib
 bin/
 dist/
-sylva
-sylvad
+/sylva
+/sylvad
 
 # Test binary, built with `go test -c`
 *.test
