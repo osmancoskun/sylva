@@ -15,6 +15,7 @@ import (
 	"github.com/osman/sylva/internal/leakcheck"
 	"github.com/osman/sylva/internal/storage"
 	"github.com/osman/sylva/internal/transport"
+	"github.com/osman/sylva/internal/vault"
 )
 
 func TestMain(m *testing.M) {
@@ -105,5 +106,74 @@ func TestLoginSetGetInheritanceThroughServer(t *testing.T) {
 	}
 	if cascaded.Item.Login.Password != "company-secret" {
 		t.Fatalf("expected cascaded password, got %q", cascaded.Item.Login.Password)
+	}
+
+	kind, secret, err := v.GetValue(ctx, "mail.company.com", vault.SecretTypeLogin, false, "")
+	if err != nil {
+		t.Fatalf("get login value: %v", err)
+	}
+	if kind != vault.SecretTypeLogin || secret != "company-secret" {
+		t.Fatalf("get login value: kind=%q secret=%q", kind, secret)
+	}
+
+	if err := v.PutSecret(ctx, &vault.SecretItem{
+		Type:       vault.SecretTypeToken,
+		Identifier: "github-token",
+		Token:      &vault.TokenPayload{Name: "github-token", Token: "tok-secret"},
+	}); err != nil {
+		t.Fatalf("put token: %v", err)
+	}
+	kind, secret, err = v.GetValue(ctx, "github-token", "", false, "")
+	if err != nil {
+		t.Fatalf("probe token: %v", err)
+	}
+	if kind != vault.SecretTypeToken || secret != "tok-secret" {
+		t.Fatalf("probe token: kind=%q secret=%q", kind, secret)
+	}
+
+	if err := v.PutSecret(ctx, &vault.SecretItem{
+		Type:       vault.SecretTypeEnv,
+		Identifier: "SYLVA_EXAMPLE",
+		Env: &vault.EnvPayload{
+			Project:   "SYLVA_EXAMPLE",
+			Variables: map[string]string{"SYLVA_EXAMPLE": "env-secret"},
+		},
+	}); err != nil {
+		t.Fatalf("put env: %v", err)
+	}
+	kind, secret, err = v.GetValue(ctx, "SYLVA_EXAMPLE", vault.SecretTypeEnv, false, "")
+	if err != nil {
+		t.Fatalf("get env: %v", err)
+	}
+	if kind != vault.SecretTypeEnv || secret != "env-secret" {
+		t.Fatalf("get env: kind=%q secret=%q", kind, secret)
+	}
+
+	if err := v.PutSecret(ctx, &vault.SecretItem{
+		Type:       vault.SecretTypeSSH,
+		Identifier: "10.0.0.1",
+		SSH:        &vault.SSHPayload{Name: "10.0.0.1", Host: "10.0.0.1", Passphrase: "ssh-secret"},
+	}); err != nil {
+		t.Fatalf("put ssh: %v", err)
+	}
+	kind, secret, err = v.GetValue(ctx, "10.0.0.1", vault.SecretTypeSSH, false, "")
+	if err != nil {
+		t.Fatalf("get ssh: %v", err)
+	}
+	if kind != vault.SecretTypeSSH || secret != "ssh-secret" {
+		t.Fatalf("get ssh: kind=%q secret=%q", kind, secret)
+	}
+
+	kind, secret, err = v.GetValue(ctx, "10.0.0.1", "", false, "")
+	if err != nil {
+		t.Fatalf("probe ssh ip: %v", err)
+	}
+	if kind != vault.SecretTypeSSH || secret != "ssh-secret" {
+		t.Fatalf("probe ssh ip: kind=%q secret=%q", kind, secret)
+	}
+
+	kind, secret, err = v.GetValue(ctx, "missing-name", "", false, "")
+	if err == nil || !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("expected missing probe, got kind=%q secret=%q err=%v", kind, secret, err)
 	}
 }

@@ -28,6 +28,9 @@ var (
 
 	// ErrLocked indicates the vault has not been unlocked with a master passphrase.
 	ErrLocked = errors.New("vault is locked")
+
+	// ErrAmbiguous indicates more than one secret type matches the identifier.
+	ErrAmbiguous = errors.New("multiple secrets match this identifier")
 )
 
 // Vault is a client-side session over a remote sylvad store and optional local cache.
@@ -190,6 +193,174 @@ func (v *Vault) LoginSet(ctx context.Context, domain, username, password string,
 		return nil, err
 	}
 	return dt.Resolve(norm, false)
+}
+
+// GetValue copies the plaintext secret for identifier. An empty secretType
+// probes password, domain, env, and ssh. Logins use the domain tree (including inherit).
+func (v *Vault) GetValue(ctx context.Context, identifier string, secretType vault.SecretType, cascade bool, envVariable string) (vault.SecretType, string, error) {
+	if err := v.requireUnlocked(); err != nil {
+		return "", "", err
+	}
+	if strings.TrimSpace(identifier) == "" {
+		return "", "", errors.New("identifier is required")
+	}
+	if secretType != "" {
+		value, err := v.valueOf(ctx, identifier, secretType, cascade, envVariable)
+		return secretType, value, err
+	}
+	matches, err := v.ProbeValues(ctx, identifier, cascade, envVariable)
+	if err != nil {
+		return "", "", err
+	}
+	switch len(matches) {
+	case 0:
+		return "", "", fmt.Errorf("%w: no secret named %s", storage.ErrNotFound, identifier)
+	case 1:
+		return matches[0].Type, matches[0].Value, nil
+	default:
+		return "", "", fmt.Errorf("%w: %s", ErrAmbiguous, identifier)
+	}
+}
+
+// SecretMatch is one probe hit for an identifier that exists as that type.
+type SecretMatch struct {
+	Type  vault.SecretType
+	Value string
+}
+
+// ProbeValues returns every secret type that currently stores this identifier.
+func (v *Vault) ProbeValues(ctx context.Context, identifier string, cascade bool, envVariable string) ([]SecretMatch, error) {
+	if err := v.requireUnlocked(); err != nil {
+		return nil, err
+	}
+	var matches []SecretMatch
+	for _, candidate := range []vault.SecretType{
+		vault.SecretTypeToken,
+		vault.SecretTypeLogin,
+		vault.SecretTypeEnv,
+		vault.SecretTypeSSH,
+	} {
+		value, err := v.valueOf(ctx, identifier, candidate, cascade && candidate == vault.SecretTypeLogin, envVariable)
+		if err == nil {
+			matches = append(matches, SecretMatch{Type: candidate, Value: value})
+			continue
+		}
+		if isMissingSecret(err) || candidate == vault.SecretTypeLogin {
+			continue
+		}
+		return nil, err
+	}
+	return matches, nil
+}
+
+func isMissingSecret(err error) bool {
+	return errors.Is(err, storage.ErrNotFound) || errors.Is(err, tree.ErrDomainNotFound) || errors.Is(err, tree.ErrEmptyDomain)
+}
+
+// GetSecret loads and unseals a secret by type and identifier.
+func (v *Vault) GetSecret(ctx context.Context, secretType vault.SecretType, identifier string) (*vault.SecretItem, error) {
+	if err := v.requireUnlocked(); err != nil {
+		return nil, err
+	}
+	if secretType == vault.SecretTypeLogin {
+		norm, err := tree.NormalizeDomain(identifier)
+		if err != nil {
+			return nil, err
+		}
+		identifier = norm
+	}
+	rec, err := v.getByIdentifier(ctx, secretType, identifier)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			return nil, fmt.Errorf("%w: no %s secret named %s", storage.ErrNotFound, secretLabel(secretType), identifier)
+		}
+		return nil, err
+	}
+	item, err := vault.Unseal(v.masterKey, rec)
+	if err != nil {
+		return nil, fmt.Errorf("unseal %s %s: %w", secretLabel(secretType), identifier, err)
+	}
+	return item, nil
+}
+
+func (v *Vault) valueOf(ctx context.Context, identifier string, secretType vault.SecretType, cascade bool, envVariable string) (string, error) {
+	if secretType == vault.SecretTypeLogin {
+		res, err := v.LoginGet(ctx, identifier, cascade)
+		if err != nil {
+			return "", err
+		}
+		if res.Item == nil || res.Item.Login == nil || res.Item.Login.Password == "" {
+			return "", fmt.Errorf("resolved login for %s has no password", identifier)
+		}
+		return res.Item.Login.Password, nil
+	}
+	item, err := v.GetSecret(ctx, secretType, identifier)
+	if err != nil {
+		return "", err
+	}
+	return plaintextSecret(item, envVariable)
+}
+
+func plaintextSecret(item *vault.SecretItem, envVariable string) (string, error) {
+	if item == nil {
+		return "", errors.New("secret item is required")
+	}
+	switch item.Type {
+	case vault.SecretTypeToken:
+		if item.Token == nil || item.Token.Token == "" {
+			return "", fmt.Errorf("password %s has no value", item.Identifier)
+		}
+		return item.Token.Token, nil
+	case vault.SecretTypeSSH:
+		if item.SSH == nil {
+			return "", fmt.Errorf("ssh %s has no payload", item.Identifier)
+		}
+		if item.SSH.Passphrase != "" {
+			return item.SSH.Passphrase, nil
+		}
+		if item.SSH.PrivateKey != "" {
+			return item.SSH.PrivateKey, nil
+		}
+		return "", fmt.Errorf("ssh %s has no passphrase", item.Identifier)
+	case vault.SecretTypeEnv:
+		if item.Env == nil || len(item.Env.Variables) == 0 {
+			return "", fmt.Errorf("env %s has no variables", item.Identifier)
+		}
+		vars := item.Env.Variables
+		if envVariable != "" {
+			value, ok := vars[envVariable]
+			if !ok {
+				return "", fmt.Errorf("env %s has no variable %s", item.Identifier, envVariable)
+			}
+			return value, nil
+		}
+		if value, ok := vars[item.Identifier]; ok {
+			return value, nil
+		}
+		if len(vars) == 1 {
+			for _, value := range vars {
+				return value, nil
+			}
+		}
+		return "", fmt.Errorf("env %s has multiple variables; pass one", item.Identifier)
+	default:
+		return "", fmt.Errorf("unsupported type %q", item.Type)
+	}
+}
+
+func secretLabel(secretType vault.SecretType) string {
+	switch secretType {
+	case vault.SecretTypeToken:
+		return "password"
+	case vault.SecretTypeLogin:
+		return "domain"
+	case vault.SecretTypeEnv:
+		return "env"
+	case vault.SecretTypeSSH:
+		return "ssh"
+	default:
+		return string(secretType)
+	}
 }
 
 // LoginGet resolves a login, optionally cascading up the domain tree.
