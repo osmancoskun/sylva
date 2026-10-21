@@ -23,6 +23,9 @@ var (
 	// ErrParentExists indicates a parent domain was found and the caller must choose inherit vs separate.
 	ErrParentExists = errors.New("parent domain exists; pass --inherit or --separate")
 
+	// ErrAlreadyExists indicates a secret with this type and identifier is already stored.
+	ErrAlreadyExists = errors.New("secret already exists")
+
 	// ErrLocked indicates the vault has not been unlocked with a master passphrase.
 	ErrLocked = errors.New("vault is locked")
 )
@@ -179,26 +182,7 @@ func (v *Vault) LoginSet(ctx context.Context, domain, username, password string,
 		}
 	}
 
-	version := v.cfg.RecordInitialVersion
-	if existing, getErr := v.getByIdentifier(ctx, vault.SecretTypeLogin, norm); getErr == nil {
-		item.ID = existing.ID
-		version = existing.Version + 1
-		if unsealed, unsealErr := vault.Unseal(v.masterKey, existing); unsealErr == nil {
-			item.CreatedAt = unsealed.CreatedAt
-		}
-	} else {
-		id, genErr := newRecordID()
-		if genErr != nil {
-			return nil, genErr
-		}
-		item.ID = id
-	}
-
-	sealed, err := vault.Seal(v.masterKey, item, version)
-	if err != nil {
-		return nil, err
-	}
-	if err := v.putRecord(ctx, sealed); err != nil {
+	if err := v.createRecord(ctx, item); err != nil {
 		return nil, err
 	}
 
@@ -218,6 +202,100 @@ func (v *Vault) LoginGet(ctx context.Context, domain string, cascade bool) (*tre
 		return nil, err
 	}
 	return dt.Resolve(domain, cascade)
+}
+
+// NearestLoginAncestor returns the closest stored parent login, or nil if none exists.
+func (v *Vault) NearestLoginAncestor(ctx context.Context, domain string) (*vault.SecretItem, error) {
+	if err := v.requireUnlocked(); err != nil {
+		return nil, err
+	}
+	dt, err := v.loginTree(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ancestor, found, err := dt.FindNearestAncestor(domain)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, nil
+	}
+	return ancestor, nil
+}
+
+// PutSecret stores a sealed secret of any supported type.
+func (v *Vault) PutSecret(ctx context.Context, item *vault.SecretItem) error {
+	return v.createRecord(ctx, item)
+}
+
+// SecretExists reports whether a secret of this type and identifier is already stored.
+func (v *Vault) SecretExists(ctx context.Context, secretType vault.SecretType, identifier string) (bool, error) {
+	if err := v.requireUnlocked(); err != nil {
+		return false, err
+	}
+	if secretType == vault.SecretTypeLogin {
+		norm, err := tree.NormalizeDomain(identifier)
+		if err != nil {
+			return false, err
+		}
+		identifier = norm
+	}
+	_, err := v.getByIdentifier(ctx, secretType, identifier)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, storage.ErrNotFound) {
+		return false, nil
+	}
+	return false, err
+}
+
+// AlreadyExists returns a typed error for a duplicate secret of this kind.
+func AlreadyExists(secretType vault.SecretType, identifier string) error {
+	switch secretType {
+	case vault.SecretTypeLogin:
+		return fmt.Errorf("%w: a password already exists for domain %s", ErrAlreadyExists, identifier)
+	case vault.SecretTypeToken:
+		return fmt.Errorf("%w: a password already exists for %s", ErrAlreadyExists, identifier)
+	case vault.SecretTypeEnv:
+		return fmt.Errorf("%w: an env secret already exists for %s", ErrAlreadyExists, identifier)
+	case vault.SecretTypeSSH:
+		return fmt.Errorf("%w: an ssh secret already exists for %s", ErrAlreadyExists, identifier)
+	default:
+		return fmt.Errorf("%w: a secret already exists for %s", ErrAlreadyExists, identifier)
+	}
+}
+
+func (v *Vault) createRecord(ctx context.Context, item *vault.SecretItem) error {
+	if err := v.requireUnlocked(); err != nil {
+		return err
+	}
+	if item == nil {
+		return errors.New("secret item is required")
+	}
+	exists, err := v.SecretExists(ctx, item.Type, item.Identifier)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return AlreadyExists(item.Type, item.Identifier)
+	}
+	id, err := newRecordID()
+	if err != nil {
+		return err
+	}
+	item.ID = id
+	sealed, err := vault.Seal(v.masterKey, item, v.cfg.RecordInitialVersion)
+	if err != nil {
+		return err
+	}
+	if err := v.putRecord(ctx, sealed); err != nil {
+		if errors.Is(err, storage.ErrConflict) {
+			return AlreadyExists(item.Type, item.Identifier)
+		}
+		return err
+	}
+	return nil
 }
 
 func (v *Vault) loginTree(ctx context.Context) (*tree.DomainTree, error) {

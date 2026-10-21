@@ -79,8 +79,16 @@ func TestLoginSetGetInheritanceThroughServer(t *testing.T) {
 		t.Fatalf("expected ErrParentExists, got %v", err)
 	}
 
+	if _, err := v.LoginSet(ctx, "company.com", "osman", "other-secret", false, false); !errors.Is(err, sylva.ErrAlreadyExists) {
+		t.Fatalf("expected ErrAlreadyExists, got %v", err)
+	}
+
 	if _, err := v.LoginSet(ctx, "mail.company.com", "", "", true, false); err != nil {
 		t.Fatalf("set mail.company.com inherit: %v", err)
+	}
+
+	if _, err := v.LoginSet(ctx, "mail.company.com", "", "", true, false); !errors.Is(err, sylva.ErrAlreadyExists) {
+		t.Fatalf("expected ErrAlreadyExists on duplicate child, got %v", err)
 	}
 
 	res, err := v.LoginGet(ctx, "mail.company.com", false)
