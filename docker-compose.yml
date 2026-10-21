@@ -1,0 +1,46 @@
+services:
+  test:
+    build:
+      context: .
+      target: test
+      args:
+        GO_IMAGE: ${SYLVA_DOCKER_GO_IMAGE}
+        RUNTIME_IMAGE: ${SYLVA_DOCKER_RUNTIME_IMAGE}
+    env_file:
+      - .env
+
+  sylvad:
+    build:
+      context: .
+      target: sylvad
+      args:
+        GO_IMAGE: ${SYLVA_DOCKER_GO_IMAGE}
+        RUNTIME_IMAGE: ${SYLVA_DOCKER_RUNTIME_IMAGE}
+    env_file:
+      - .env
+    environment:
+      SYLVA_HOST: 0.0.0.0
+    ports:
+      - "${SYLVA_HOST}:${SYLVA_PORT}:${SYLVA_PORT}"
+    networks:
+      - sylva-net
+
+  sylva:
+    build:
+      context: .
+      target: sylva
+      args:
+        GO_IMAGE: ${SYLVA_DOCKER_GO_IMAGE}
+        RUNTIME_IMAGE: ${SYLVA_DOCKER_RUNTIME_IMAGE}
+    env_file:
+      - .env
+    environment:
+      SYLVA_HOST: sylvad
+    depends_on:
+      - sylvad
+    networks:
+      - sylva-net
+
+networks:
+  sylva-net:
+    driver: bridge

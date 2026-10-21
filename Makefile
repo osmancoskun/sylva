@@ -3,8 +3,9 @@ BINARY_DAEMON := sylvad
 BUILD_DIR := bin
 GO := go
 GOFLAGS :=
+DOCKER_COMPOSE := docker compose
 
-.PHONY: all build build-cli build-daemon test lint clean
+.PHONY: all build build-cli build-daemon test vet clean docker-test docker-smoke docker-down
 
 all: build
 
@@ -23,6 +24,17 @@ test:
 
 vet:
 	$(GO) vet ./...
+
+docker-test:
+	$(DOCKER_COMPOSE) run --rm --build test
+
+docker-smoke:
+	$(DOCKER_COMPOSE) up -d --build sylvad
+	$(DOCKER_COMPOSE) run --rm --build sylva ping
+	$(DOCKER_COMPOSE) down --remove-orphans
+
+docker-down:
+	$(DOCKER_COMPOSE) down --remove-orphans
 
 clean:
 	rm -rf $(BUILD_DIR)

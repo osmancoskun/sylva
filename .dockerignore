@@ -1,0 +1,14 @@
+.git
+bin/
+dist/
+*.db
+*.db-shm
+*.db-wal
+*.pem
+*.crt
+*.key
+*.sock
+.sylva/
+.idea/
+.vscode/
+.DS_Store
