@@ -5,50 +5,64 @@ package transport
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/osman/sylva/internal/api"
 	"github.com/osman/sylva/internal/config"
+	"github.com/osman/sylva/internal/storage"
 )
 
-// StatusResponse represents the payload returned by the server health/ping endpoint.
-type StatusResponse struct {
-	Status    string    `json:"status"`
-	Service   string    `json:"service"`
-	Version   string    `json:"version"`
-	MTLS      bool      `json:"mtls_enabled"`
-	Tailscale bool      `json:"tailscale_enabled"`
-	Timestamp time.Time `json:"timestamp"`
-}
+// StatusResponse is an alias for the catalog ping payload so existing callers
+// keep compiling against the transport package.
+type StatusResponse = api.StatusResponse
 
 // Server wraps the HTTP server and routing for the sylvad daemon.
 type Server struct {
 	cfg        config.ServerConfig
+	store      storage.Store
 	httpServer *http.Server
 	logger     *slog.Logger
 	startedAt  time.Time
 }
 
 // NewServer creates and configures a new transport Server instance.
-func NewServer(cfg config.ServerConfig, logger *slog.Logger) *Server {
+func NewServer(cfg config.ServerConfig, store storage.Store, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
 
 	s := &Server{
 		cfg:       cfg,
+		store:     store,
 		logger:    logger,
 		startedAt: time.Now().UTC(),
 	}
 
+	prefix := strings.TrimRight(cfg.APIPrefix, "/")
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/v1/ping", s.handlePing)
-	mux.HandleFunc("GET /healthz", s.handlePing)
+	handlers := map[string]http.HandlerFunc{
+		api.EndpointPing:         s.handlePing,
+		api.EndpointHealthz:      s.handlePing,
+		api.EndpointPutRecord:    s.handlePutRecord,
+		api.EndpointGetRecord:    s.handleGetRecordByID,
+		api.EndpointDeleteRecord: s.handleDeleteRecord,
+		api.EndpointListRecords:  s.handleListRecords,
+		api.EndpointGetSalt:      s.handleGetSalt,
+		api.EndpointPutSalt:      s.handlePutSalt,
+	}
+	for _, ep := range api.HTTPEndpoints() {
+		h, ok := handlers[ep.Name]
+		if !ok {
+			panic("transport: missing handler for API endpoint " + ep.Name)
+		}
+		mux.HandleFunc(ep.Pattern(prefix), h)
+	}
 
 	s.httpServer = &http.Server{
 		Addr:              cfg.ListenAddr,
@@ -105,7 +119,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 }
 
 func (s *Server) handlePing(w http.ResponseWriter, _ *http.Request) {
-	resp := StatusResponse{
+	resp := api.StatusResponse{
 		Status:    "ok",
 		Service:   s.cfg.ServiceName,
 		Version:   s.cfg.Version,
@@ -113,10 +127,7 @@ func (s *Server) handlePing(w http.ResponseWriter, _ *http.Request) {
 		Tailscale: s.cfg.EnableTailscale,
 		Timestamp: time.Now().UTC(),
 	}
-
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(resp)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) loggingMiddleware(next http.Handler) http.Handler {

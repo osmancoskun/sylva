@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	"github.com/osman/sylva/internal/config"
+	"github.com/osman/sylva/internal/storage"
 	"github.com/osman/sylva/internal/transport"
 )
 
@@ -41,10 +42,17 @@ func main() {
 		Level: cfg.LogLevel,
 	}))
 
+	store, err := storage.OpenSQLite(cfg.DBPath, cfg.SQLiteBusyTimeout)
+	if err != nil {
+		logger.Error("failed to open sqlite store", slog.Any("error", err))
+		os.Exit(1)
+	}
+	defer store.Close()
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	srv := transport.NewServer(cfg, logger)
+	srv := transport.NewServer(cfg, store, logger)
 	if err := srv.Start(ctx); err != nil {
 		logger.Error("server exited with error", slog.Any("error", err))
 		os.Exit(1)
