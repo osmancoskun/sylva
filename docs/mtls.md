@@ -87,6 +87,19 @@ Use the same `SYLVA_PORT` as plaintext (default `8443`). mTLS is a mode on that 
 
 `ping` should report `mTLS: true`. A client without the cert, or a cert from another CA, must fail the handshake.
 
+## Enabling mTLS later
+
+`sylvad` does not speak HTTP and mTLS on the same listener, and it does not upgrade an existing HTTP session. You start without TLS, later set `SYLVA_MTLS_ENABLED=true`, put cert paths in `.env`, set `SYLVA_SCHEME=https`, **restart** `sylvad`. From that moment every new TCP connection must finish TLS 1.3 with a client certificate **before** any vault request. The previous HTTP client is not “detected later”; it is a new connection that already fails.
+
+| What the old client still does | What you see | What it means |
+| --- | --- | --- |
+| `SYLVA_SCHEME=http` (plaintext) | `sylvad is in HTTPS/mTLS mode but this client sent HTTP` | First bytes were `GET`, not a TLS ClientHello. The server never asked for a certificate. |
+| `https` without your CA | `this client does not trust sylvad's certificate` | TLS started, but the private CA is not in the system trust store. |
+| CA present, no client cert | `sylvad requires a client certificate (mTLS)` | Handshake reached TLS; the server sent `certificate_required` and closed. No JSON body. |
+| Client cert from another CA | untrusted CA, or `sylvad rejected this client certificate` | CA files must match on both sides. |
+
+`sylva` prints that reason on stderr (and points at this page). Fix the **client** `.env` the same way as the server, then `sylva ping`. Vault data in SQLite does not change; only the transport does.
+
 ## Docker
 
 Compose talks to the daemon as hostname `sylvad`. Add `DNS:sylvad` to the server SAN (and rebuild the cert) or the client name check fails even with a valid client certificate.

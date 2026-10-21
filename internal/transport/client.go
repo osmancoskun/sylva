@@ -200,7 +200,7 @@ func (c *Client) doJSON(ctx context.Context, method, reqURL string, in any, want
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("request to %s failed: %w", reqURL, err)
+		return explainRequestError(reqURL, err)
 	}
 	if resp == nil {
 		return fmt.Errorf("empty HTTP response from %s", reqURL)
@@ -213,10 +213,10 @@ func (c *Client) doJSON(ctx context.Context, method, reqURL string, in any, want
 	}
 
 	if wantStatus != 0 && resp.StatusCode != wantStatus {
-		return &HTTPError{Status: resp.StatusCode, Body: strings.TrimSpace(string(body))}
+		return explainStatus(&HTTPError{Status: resp.StatusCode, Body: strings.TrimSpace(string(body))})
 	}
 	if wantStatus == 0 && resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return &HTTPError{Status: resp.StatusCode, Body: strings.TrimSpace(string(body))}
+		return explainStatus(&HTTPError{Status: resp.StatusCode, Body: strings.TrimSpace(string(body))})
 	}
 	if out == nil || resp.StatusCode == http.StatusNoContent || len(body) == 0 {
 		return nil

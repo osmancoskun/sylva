@@ -14,6 +14,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -39,6 +40,25 @@ func TestMTLSRejectsPlainHTTPClient(t *testing.T) {
 
 	if _, err := plain.Ping(context.Background()); err == nil {
 		t.Fatal("expected ping without client certificate to fail")
+	} else if !strings.Contains(err.Error(), "does not trust") {
+		t.Fatalf("expected untrusted-CA hint, got %v", err)
+	}
+
+	httpCfg := clientCfg
+	httpCfg.EnableMTLS = false
+	httpCfg.CACertPath = ""
+	httpCfg.ClientCertPath = ""
+	httpCfg.ClientKeyPath = ""
+	httpCfg.ServerURL = "http://" + strings.TrimPrefix(clientCfg.ServerURL, "https://")
+	httpClient, err := transport.NewClient(httpCfg)
+	if err != nil {
+		t.Fatalf("http client: %v", err)
+	}
+	t.Cleanup(httpClient.Close)
+	if _, err := httpClient.Ping(context.Background()); err == nil {
+		t.Fatal("expected HTTP client against HTTPS/mTLS to fail")
+	} else if !strings.Contains(err.Error(), "sent HTTP") && !strings.Contains(err.Error(), "HTTPS/mTLS") {
+		t.Fatalf("expected HTTP-vs-HTTPS hint, got %v", err)
 	}
 
 	okClient, err := transport.NewClient(clientCfg)
@@ -69,6 +89,10 @@ func TestMTLSRejectsForeignClientCert(t *testing.T) {
 	t.Cleanup(client.Close)
 	if _, err := client.Ping(context.Background()); err == nil {
 		t.Fatal("expected ping with foreign CA to fail")
+	} else if !strings.Contains(err.Error(), "does not trust") &&
+		!strings.Contains(err.Error(), "rejected this client certificate") &&
+		!strings.Contains(err.Error(), "client certificate") {
+		t.Fatalf("expected CA mismatch hint, got %v", err)
 	}
 }
 
