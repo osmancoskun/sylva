@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	sylva "github.com/osman/sylva/internal/client"
 	"github.com/osman/sylva/internal/config"
 	"github.com/osman/sylva/internal/vault"
 )
@@ -84,6 +85,35 @@ func parseGetArgs(rest []string, typ string) (string, string, error) {
 		return "", "", fmt.Errorf("usage: sylva get <id> [<type>]")
 	}
 	return rest[0], typ, nil
+}
+
+func resolveStoredType(ctx context.Context, v *sylva.Vault, identifier string, kind vault.SecretType) (vault.SecretType, error) {
+	if kind != "" {
+		exists, err := v.SecretExists(ctx, kind, identifier)
+		if err != nil {
+			return "", err
+		}
+		if !exists {
+			return "", fmt.Errorf("no %s secret named %s", secretTypeLabel(kind), identifier)
+		}
+		return kind, nil
+	}
+	matches, err := v.ProbeValues(ctx, identifier, false, "")
+	if err != nil {
+		return "", err
+	}
+	switch len(matches) {
+	case 0:
+		return "", fmt.Errorf("no secret named %s", identifier)
+	case 1:
+		return matches[0].Type, nil
+	default:
+		var types []vault.SecretType
+		for _, match := range matches {
+			types = append(types, match.Type)
+		}
+		return promptSecretType(identifier, types)
+	}
 }
 
 func resolveGetType(raw string) (vault.SecretType, error) {

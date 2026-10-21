@@ -49,6 +49,10 @@ docker-smoke:
 	$(DOCKER_COMPOSE) run --rm --no-deps sylva get SYLVA_EXAMPLE env
 	$(DOCKER_COMPOSE) run --rm --no-deps sylva set 10.0.0.1 sshsecret ssh
 	$(DOCKER_COMPOSE) run --rm --no-deps sylva get 10.0.0.1 ssh
+	$(DOCKER_COMPOSE) run --rm --no-deps sylva list
+	$(DOCKER_COMPOSE) run --rm --no-deps sylva update github-token tokensecret2
+	$(DOCKER_COMPOSE) run --rm --no-deps sylva get github-token
+	$(DOCKER_COMPOSE) run --rm --no-deps sylva delete github-token --yes
 	$(DOCKER_COMPOSE) down --remove-orphans
 
 docker-down:

@@ -39,11 +39,16 @@ make build
 ./bin/sylva get SYLVA_EXAMPLE env
 ./bin/sylva get 10.0.0.1 ssh
 ./bin/sylva get github-token
+./bin/sylva list
+./bin/sylva update github-token 'new-secret'
+./bin/sylva delete github-token
 ```
 
 `set` with no args walks through type, credentials, and a hidden double password. Args skip those prompts: `set <id> [password] [type]`. A dotted name or IP defaults to domain. For a domain without a password, Sylva checks for a parent and asks about inherit.
 
 `get <id> [type]` copies the secret to the clipboard. Domain names resolve through inherit. If the type is omitted, Sylva looks up every kind. If it still cannot tell — or an IP could be a domain or ssh — it asks: password, domain, env, or ssh. The agent keeps the clipboard until `SYLVA_CLIPBOARD_CLEAR_AFTER`.
+
+`list` prints type and identifier only. `update` replaces an existing secret. `delete` removes one after confirmation.
 
 Config is `.env`. Tests: `make docker-test` / `make docker-smoke`.
 

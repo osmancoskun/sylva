@@ -30,7 +30,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  agent                Run the local session agent (foreground)\n")
 		fmt.Fprintf(os.Stderr, "  set [<id> [<password>] [<type>]]\n")
 		fmt.Fprintf(os.Stderr, "                       Store a secret (interactive if args are omitted)\n")
-		fmt.Fprintf(os.Stderr, "  get <id> [<type>]    Copy a secret to the clipboard\n\n")
+		fmt.Fprintf(os.Stderr, "  get <id> [<type>]    Copy a secret to the clipboard\n")
+		fmt.Fprintf(os.Stderr, "  list [<type>]        List stored secret identifiers\n")
+		fmt.Fprintf(os.Stderr, "  update <id> [<password>] [<type>]\n")
+		fmt.Fprintf(os.Stderr, "                       Replace an existing secret\n")
+		fmt.Fprintf(os.Stderr, "  delete <id> [<type>] Remove an existing secret\n\n")
 		fmt.Fprintf(os.Stderr, "Flags:\n")
 		flag.PrintDefaults()
 	}
@@ -84,6 +88,18 @@ func main() {
 		}
 	case "get", "cp", "copy":
 		if err := runGet(cfg, args[1:]); err != nil {
+			fatal(err)
+		}
+	case "list", "ls":
+		if err := runList(cfg, args[1:]); err != nil {
+			fatal(err)
+		}
+	case "update":
+		if err := runUpdate(cfg, args[1:]); err != nil {
+			fatal(err)
+		}
+	case "delete", "rm", "remove":
+		if err := runDelete(cfg, args[1:]); err != nil {
 			fatal(err)
 		}
 	default:
@@ -159,7 +175,7 @@ func isBoolFlag(arg string) bool {
 	name := strings.TrimLeft(arg, "-")
 	name, _, _ = strings.Cut(name, "=")
 	switch name {
-	case "inherit", "cascade":
+	case "inherit", "cascade", "yes":
 		return true
 	default:
 		return false
