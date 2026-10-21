@@ -17,7 +17,7 @@ func explainStatus(he *HTTPError) error {
 		return nil
 	}
 	if he.Status == http.StatusBadRequest && strings.Contains(he.Body, "HTTP request to an HTTPS server") {
-		return fmt.Errorf("sylvad is in HTTPS/mTLS mode but this client sent HTTP. Set SYLVA_SCHEME=https and SYLVA_MTLS_ENABLED=true with certificate paths (%s): %w", mtlsDocs, he)
+		return fmt.Errorf("sylvad is in HTTPS/mTLS mode but this client sent HTTP. Run sylva enable mtls on this machine (%s): %w", mtlsDocs, he)
 	}
 	return he
 }
@@ -29,7 +29,7 @@ func explainTransport(err error) error {
 	msg := err.Error()
 	switch {
 	case strings.Contains(msg, "certificate required"):
-		return fmt.Errorf("sylvad requires a client certificate (mTLS). Set SYLVA_MTLS_ENABLED=true and SYLVA_CA_CERT_PATH, SYLVA_CLIENT_CERT_PATH, SYLVA_CLIENT_KEY_PATH (%s): %w", mtlsDocs, err)
+		return fmt.Errorf("sylvad requires a client certificate (mTLS). Place certs in .sylva/certs and run sylva enable mtls (%s): %w", mtlsDocs, err)
 	case strings.Contains(msg, "unknown authority") || strings.Contains(msg, "certificate signed by unknown"):
 		return fmt.Errorf("this client does not trust sylvad's certificate. Point SYLVA_CA_CERT_PATH at the same CA used by the server (%s): %w", mtlsDocs, err)
 	case strings.Contains(msg, "bad certificate") || strings.Contains(msg, "certificate unknown"):

@@ -1,8 +1,8 @@
 # Setup
 
-Sylva is two binaries that share one `.env`. `sylvad` stores ciphertext in SQLite. `sylva` encrypts on the client, talks to the daemon, and copies secrets to the clipboard. The server never sees plaintext or identifiers (only a blind index and type).
+Sylva is two binaries. Tunables (timeouts, Argon2id, password length, paths) ship in `internal/config/default.conf` and optional `.sylva/config`. `.env` is only host, port, and secrets (auth key, passphrase). `sylvad` stores ciphertext in SQLite. `sylva` encrypts on the client, talks to the daemon, and copies secrets to the clipboard. The server never sees plaintext or identifiers (only a blind index and type).
 
-This page is a first run on **localhost over HTTP**. TLS 1.3 mTLS is optional and later: [mtls.md](mtls.md). Tailscale is not implemented yet.
+This page is a first run on **localhost over HTTP**. TLS 1.3 mTLS is optional and later: [mtls.md](mtls.md). Tailscale is optional: [tailscale.md](tailscale.md).
 
 Linux is the supported desktop: native X11/Wayland clipboard and the kernel keyring. macOS and Windows clipboard/keyring are stubs.
 
@@ -15,9 +15,9 @@ cp .env.example .env
 make build
 ```
 
-`.env` is gitignored. Do not commit it. Default listen address is `127.0.0.1:8443` with `SYLVA_SCHEME=http`.
+`.env` is gitignored. Do not commit it. Default listen address is `127.0.0.1:8443` (`scheme=http` in the shipped config).
 
-Both commands take `-env PATH` (default `.env`). `sylvad -addr host:port` overrides the listen address. `sylva -server URL` overrides the daemon URL for one invocation.
+Both commands take `-env PATH` (default `.env`). `sylvad -addr host:port` overrides the listen address. `sylva -server URL` overrides the daemon URL for one invocation. mTLS and Tailscale are not flags: `sylva enable mtls` / `sylva enable tailscale` writes `.sylva/config` once.
 
 ## Start the daemon
 
@@ -26,7 +26,7 @@ Both commands take `-env PATH` (default `.env`). `sylvad -addr host:port` overri
 ./bin/sylva ping
 ```
 
-`ping` should report `Status: ok` and `mTLS: false`. Data file: `SYLVA_SERVER_DB_PATH` (default `.sylva/sylvad.db`). The CLI may also keep a ciphertext cache at `SYLVA_CLIENT_CACHE_PATH`.
+`ping` should report `Status: ok` and `mTLS: false`. Data file: `server_db_path` (default `.sylva/sylvad.db`). The CLI may also keep a ciphertext cache at `client_cache_path`.
 
 ## Initialize the vault
 
@@ -44,9 +44,9 @@ If you lose the passphrase, ciphertext in SQLite cannot be recovered. Back up `.
 
 Secret commands need a master key. Resolution order:
 
-1. Session agent (unix socket `SYLVA_AGENT_SOCKET_PATH`), if `SYLVA_AGENT_ENABLED=true`
+1. Session agent (unix socket `agent_socket_path`), if `agent_enabled=true`
 2. `SYLVA_MASTER_PASSPHRASE` in `.env` (convenient for smoke tests; leave empty on a real machine)
-3. Linux kernel keyring, if `SYLVA_KEYRING_ENABLED=true` and you have run `sylva unlock`
+3. Linux kernel keyring, if `keyring_enabled=true` in config and you have run `sylva unlock`
 4. Otherwise the command fails closed
 
 Typical interactive flow:
@@ -59,7 +59,7 @@ Typical interactive flow:
 SYLVA_MASTER_PASSPHRASE='your-passphrase' ./bin/sylva unlock
 ```
 
-`get` starts a detached agent if none is listening, so the CLI can exit while the agent owns the clipboard until `SYLVA_CLIPBOARD_CLEAR_AFTER`. `sylva lock` wipes the agent key and the keyring entry.
+`get` starts a detached agent if none is listening, so the CLI can exit while the agent owns the clipboard until `clipboard_clear_after`. `sylva lock` wipes the agent key and the keyring entry.
 
 ## Secrets
 
@@ -81,9 +81,9 @@ SYLVA_MASTER_PASSPHRASE='your-passphrase' ./bin/sylva unlock
 
 Clipboard backends: `auto` (X11 or Wayland), `os`, `memory`, `file`. `auto`/`os` need the agent. Docker smoke uses `memory`.
 
-## Same `.env` on two hosts
+## Same machine settings on two hosts
 
-`SYLVA_HOST` is both the daemon bind host (unless `SYLVA_SERVER_ADDR` is set) and the host the CLI dials. On a remote daemon, the client `.env` should use that hostname (or `sylva -server`). The server certificate SAN must match that name if you turn on mTLS.
+`SYLVA_HOST` is both the daemon bind host (unless `server_addr` / `SYLVA_SERVER_ADDR` is set) and the host the CLI dials. On a remote daemon, the client `.env` should use that hostname (or `sylva -server`). The server certificate SAN must match that name if you turn on mTLS. Host and port can later live in `.sylva/config` instead of `.env`; process environment still overrides.
 
 ## Tests
 
@@ -96,5 +96,4 @@ make docker-smoke
 
 ## Next
 
-- Expose the daemon beyond localhost: [mtls.md](mtls.md). Same port as HTTP; restart into mTLS; update **both** `.env` files.
-- Tailscale: flags exist (`SYLVA_TAILSCALE_ENABLED`, `sylvad -tailscale`) but `sylvad` exits with `tailscale is not implemented`.
+- Expose the daemon beyond localhost: [mtls.md](mtls.md) and/or [tailscale.md](tailscale.md). Tailscale listens only on the tailnet; mTLS can wrap that listener.

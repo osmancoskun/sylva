@@ -25,6 +25,7 @@ func TestMain(m *testing.M) {
 
 func startTestServer(t *testing.T) (config.ServerConfig, config.ClientConfig, *transport.Client, context.CancelFunc) {
 	t.Helper()
+	config.IsolateProcessEnv(t)
 	envPath := filepath.Join("..", "..", ".env.example")
 
 	srvCfg, err := config.LoadServerConfig(envPath)
@@ -197,6 +198,6 @@ func TestVaultSaltAndRecordRoundTrip(t *testing.T) {
 		t.Fatalf("expected get after delete to fail")
 	}
 	if srvCfg.RecordInitialVersion <= 0 {
-		t.Fatalf("expected positive SYLVA_RECORD_INITIAL_VERSION from env")
+		t.Fatalf("expected positive record_initial_version from config")
 	}
 }

@@ -16,6 +16,7 @@ func TestMain(m *testing.M) {
 
 func deriveTestMasterKey(t *testing.T) []byte {
 	t.Helper()
+	config.IsolateProcessEnv(t)
 	envPath := filepath.Join("..", "..", ".env.example")
 	cfg, err := config.LoadCryptoConfig(envPath)
 	if err != nil {

@@ -106,7 +106,8 @@ func TestNewClientMTLSRequiresCerts(t *testing.T) {
 	}
 }
 
-func TestServeRejectsUnimplementedTailscale(t *testing.T) {
+func TestStartListensOnTailscale(t *testing.T) {
+	config.IsolateProcessEnv(t)
 	envPath := filepath.Join("..", "..", ".env.example")
 	srvCfg, err := config.LoadServerConfig(envPath)
 	if err != nil {
@@ -120,20 +121,68 @@ func TestServeRejectsUnimplementedTailscale(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
-	srv := transport.NewServer(srvCfg, store, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	ln, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", "0"))
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	defer ln.Close()
-	err = srv.Serve(context.Background(), ln)
-	if err == nil {
-		t.Fatal("expected tailscale not implemented")
+	closed := false
+	restore := transport.SetTailscaleListenerForTest(func(context.Context, config.ServerConfig, *slog.Logger) (net.Listener, func() error, error) {
+		return ln, func() error {
+			closed = true
+			return nil
+		}, nil
+	})
+	t.Cleanup(restore)
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := transport.NewServer(srvCfg, store, logger)
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- srv.Start(ctx)
+	}()
+
+	clientCfg, err := config.LoadClientConfig(envPath)
+	if err != nil {
+		t.Fatalf("load client config: %v", err)
+	}
+	clientCfg.ServerURL = "http://" + ln.Addr().String()
+	client, err := transport.NewClient(clientCfg)
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	t.Cleanup(client.Close)
+
+	deadline := time.Now().Add(2 * time.Second)
+	var status *transport.StatusResponse
+	for time.Now().Before(deadline) {
+		status, err = client.Ping(context.Background())
+		if err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("ping via tailscale listener: %v", err)
+	}
+	if status == nil {
+		t.Fatal("ping via tailscale listener: empty status")
+	}
+	if !status.Tailscale {
+		t.Fatal("expected ping to report tailscale_enabled")
+	}
+	cancel()
+	if err := <-errCh; err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if !closed {
+		t.Fatal("expected tailscale closer to run")
 	}
 }
 
 func startMTLSServer(t *testing.T) (config.ServerConfig, config.ClientConfig) {
 	t.Helper()
+	config.IsolateProcessEnv(t)
 	envPath := filepath.Join("..", "..", ".env.example")
 	bundle := writeMTLSBundle(t, t.TempDir(), "sylva")
 

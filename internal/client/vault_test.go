@@ -23,6 +23,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestLoginSetGetInheritanceThroughServer(t *testing.T) {
+	config.IsolateProcessEnv(t)
 	envPath := filepath.Join("..", "..", ".env.example")
 	srvCfg, err := config.LoadServerConfig(envPath)
 	if err != nil {

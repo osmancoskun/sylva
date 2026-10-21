@@ -20,7 +20,7 @@ Logins sit in a domain tree. `mail.company.com` can inherit `company.com` instea
 
 `sylvad` is the HTTP server and SQLite store. `sylva` is the CLI and exits when the command finishes. `sylva agent` keeps the session key and clipboard after that. `get` starts the agent if it is not running.
 
-Setup: [docs/setup.md](docs/setup.md). Optional TLS 1.3 mTLS: [docs/mtls.md](docs/mtls.md).
+Setup: [docs/setup.md](docs/setup.md). Optional TLS 1.3 mTLS: [docs/mtls.md](docs/mtls.md). Optional Tailscale: [docs/tailscale.md](docs/tailscale.md).
 
 ## Use
 
@@ -48,12 +48,8 @@ make build
 
 `set` with no args walks through type, credentials, and a hidden double password. Args skip those prompts: `set <id> [password] [type]`. A dotted name or IP defaults to domain. For a domain without a password, Sylva checks for a parent and asks about inherit.
 
-`get <id> [type]` copies the secret to the clipboard. Domain names resolve through inherit. If the type is omitted, Sylva looks up every kind. If it still cannot tell — or an IP could be a domain or ssh — it asks: password, domain, env, or ssh. The agent keeps the clipboard until `SYLVA_CLIPBOARD_CLEAR_AFTER`.
+`get <id> [type]` copies the secret to the clipboard. Domain names resolve through inherit. If the type is omitted, Sylva looks up every kind. If it still cannot tell — or an IP could be a domain or ssh — it asks: password, domain, env, or ssh. The agent keeps the clipboard until `clipboard_clear_after`.
 
 `list` prints type and identifier only. `update` replaces an existing secret. `delete` removes one after confirmation.
 
-Config is `.env`. Tests: `make docker-test` / `make docker-smoke`.
-
-## Todo
-
-- Tailscale (flags only)
+Bind and secrets are `.env`. Everything else is `internal/config/default.conf` plus `.sylva/config`. Tests: `make docker-test` / `make docker-smoke`.

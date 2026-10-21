@@ -34,11 +34,27 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  list [<type>]        List stored secret identifiers\n")
 		fmt.Fprintf(os.Stderr, "  update <id> [<password>] [<type>]\n")
 		fmt.Fprintf(os.Stderr, "                       Replace an existing secret\n")
-		fmt.Fprintf(os.Stderr, "  delete <id> [<type>] Remove an existing secret\n\n")
+		fmt.Fprintf(os.Stderr, "  delete <id> [<type>] Remove an existing secret\n")
+		fmt.Fprintf(os.Stderr, "  enable mtls|tailscale\n")
+		fmt.Fprintf(os.Stderr, "                       Persist a transport feature in .sylva/config\n")
+		fmt.Fprintf(os.Stderr, "  disable mtls|tailscale\n")
+		fmt.Fprintf(os.Stderr, "                       Turn a persisted transport feature off\n\n")
 		fmt.Fprintf(os.Stderr, "Flags:\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
+
+	args := flag.Args()
+	cmd := "ping"
+	if len(args) > 0 {
+		cmd = args[0]
+	}
+	if cmd == "enable" || cmd == "disable" {
+		if err := runFeatureToggle(cmd == "enable", args[1:]); err != nil {
+			fatal(err)
+		}
+		return
+	}
 
 	cfg, err := config.LoadClientConfig(*envFile)
 	if err != nil {
@@ -51,12 +67,6 @@ func main() {
 	}
 	if *timeoutOverride > 0 {
 		cfg.Timeout = *timeoutOverride
-	}
-
-	args := flag.Args()
-	cmd := "ping"
-	if len(args) > 0 {
-		cmd = args[0]
 	}
 
 	switch cmd {
@@ -184,6 +194,44 @@ func isBoolFlag(arg string) bool {
 	default:
 		return false
 	}
+}
+
+func runFeatureToggle(enable bool, args []string) error {
+	if len(args) != 1 {
+		return fmt.Errorf("usage: sylva enable|disable mtls|tailscale")
+	}
+	feature := strings.ToLower(args[0])
+	if enable && feature == "mtls" {
+		missing := []string{}
+		for _, p := range []string{
+			config.DefaultCACertPath,
+			config.DefaultServerCertPath,
+			config.DefaultServerKeyPath,
+			config.DefaultClientCertPath,
+			config.DefaultClientKeyPath,
+		} {
+			if _, err := os.Stat(p); err != nil {
+				missing = append(missing, p)
+			}
+		}
+		if len(missing) > 0 {
+			return fmt.Errorf("mTLS certs missing (%s); create them first, see docs/mtls.md", strings.Join(missing, ", "))
+		}
+	}
+	if enable && feature == "tailscale" {
+		if err := os.MkdirAll(config.DefaultTailscaleStateDir, 0o700); err != nil {
+			return err
+		}
+	}
+	if err := config.SetLocalFeature(feature, enable); err != nil {
+		return err
+	}
+	state := "disabled"
+	if enable {
+		state = "enabled"
+	}
+	fmt.Printf("%s %s in %s; restart sylvad\n", feature, state, config.LocalConfigPath())
+	return nil
 }
 
 func fatal(err error) {

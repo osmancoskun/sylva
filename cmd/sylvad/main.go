@@ -18,8 +18,6 @@ import (
 func main() {
 	envFile := flag.String("env", ".env", "path to environment configuration file")
 	addrOverride := flag.String("addr", "", "override listen address (host:port)")
-	mtlsOverride := flag.Bool("mtls", false, "force enable mutual TLS (mTLS) authentication")
-	tailscaleOverride := flag.Bool("tailscale", false, "force enable Tailscale integration")
 	flag.Parse()
 
 	cfg, err := config.LoadServerConfig(*envFile)
@@ -30,12 +28,6 @@ func main() {
 
 	if *addrOverride != "" {
 		cfg.ListenAddr = *addrOverride
-	}
-	if *mtlsOverride {
-		cfg.EnableMTLS = true
-	}
-	if *tailscaleOverride {
-		cfg.EnableTailscale = true
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{

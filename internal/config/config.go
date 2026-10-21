@@ -1,24 +1,17 @@
-// Package config provides centralized environment-driven configuration loading
-// for both the Sylva client (sylva) and server daemon (sylvad).
-// All runtime parameters—including network addresses, ports, timeouts, KDF
-// settings, and security toggles—are loaded from a .env file or OS environment
-// variables without hardcoded static values in application packages.
+// Package config loads Sylva runtime settings from shipped defaults,
+// .sylva/config, and a small .env allowlist (host, port, secrets).
 package config
 
 import (
-	"bufio"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net"
-	"os"
-	"strconv"
 	"strings"
 	"time"
 )
 
 // CryptoConfig holds centralized parameters for Argon2id key derivation and
-// password generation loaded from environment configuration.
+// password generation.
 type CryptoConfig struct {
 	KDFTime            uint32
 	KDFMemoryKB        uint32
@@ -52,6 +45,9 @@ type ServerConfig struct {
 	ServerKeyPath        string
 	EnableTailscale      bool
 	TailscaleNode        string
+	TailscaleStateDir    string
+	TailscaleAuthKey     string
+	TailscaleTags        []string
 }
 
 // ClientConfig holds runtime configuration for the sylva CLI client.
@@ -87,84 +83,37 @@ type ClientConfig struct {
 	Crypto               CryptoConfig
 }
 
-// LoadDotEnv reads key=value pairs from the specified file path and populates
-// any environment variables that are not already set in the process environment.
+// LoadDotEnv reads allowlisted secrets and bind settings from a .env file
+// into the process environment when they are not already set.
 func LoadDotEnv(path string) error {
-	file, err := os.Open(path)
-	if err != nil {
-		return fmt.Errorf("open env file %s: %w", path, err)
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	lineNum := 0
-	for scanner.Scan() {
-		lineNum++
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-
-		line = strings.TrimPrefix(line, "export ")
-		idx := strings.IndexByte(line, '=')
-		if idx <= 0 {
-			return fmt.Errorf("invalid env syntax at %s:%d", path, lineNum)
-		}
-
-		key := strings.TrimSpace(line[:idx])
-		val := strings.TrimSpace(line[idx+1:])
-		if len(val) >= 2 {
-			if (val[0] == '"' && val[len(val)-1] == '"') || (val[0] == '\'' && val[len(val)-1] == '\'') {
-				val = val[1 : len(val)-1]
-			}
-		}
-
-		if _, exists := os.LookupEnv(key); !exists {
-			if err := os.Setenv(key, val); err != nil {
-				return fmt.Errorf("set env %s: %w", key, err)
-			}
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("scan env file %s: %w", path, err)
-	}
-	return nil
+	return loadDotEnvAllowlist(path)
 }
 
-// LoadCryptoConfig loads and validates cryptographic parameters from the environment.
-func LoadCryptoConfig(envPath string) (CryptoConfig, error) {
-	if envPath != "" {
-		if err := LoadDotEnv(envPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return CryptoConfig{}, err
-		}
-	}
-
-	kdfTime, err := requireUint32Env("SYLVA_KDF_TIME")
+func cryptoFromSettings(s *settings) (CryptoConfig, error) {
+	kdfTime, err := s.uint32Val("kdf_time")
 	if err != nil {
 		return CryptoConfig{}, err
 	}
-	kdfMemoryKB, err := requireUint32Env("SYLVA_KDF_MEMORY_KB")
+	kdfMemoryKB, err := s.uint32Val("kdf_memory_kb")
 	if err != nil {
 		return CryptoConfig{}, err
 	}
-	kdfThreads, err := requireUint8Env("SYLVA_KDF_THREADS")
+	kdfThreads, err := s.uint8Val("kdf_threads")
 	if err != nil {
 		return CryptoConfig{}, err
 	}
-	kdfKeyLen, err := requireUint32Env("SYLVA_KDF_KEY_LEN")
+	kdfKeyLen, err := s.uint32Val("kdf_key_len")
 	if err != nil {
 		return CryptoConfig{}, err
 	}
-	kdfSaltLen, err := requireIntEnv("SYLVA_KDF_SALT_LEN")
+	kdfSaltLen, err := s.intVal("kdf_salt_len")
 	if err != nil {
 		return CryptoConfig{}, err
 	}
-	pwdDefaultLen, err := requireIntEnv("SYLVA_PASSWORD_DEFAULT_LEN")
+	pwdDefaultLen, err := s.intVal("password_default_len")
 	if err != nil {
 		return CryptoConfig{}, err
 	}
-
 	return CryptoConfig{
 		KDFTime:            kdfTime,
 		KDFMemoryKB:        kdfMemoryKB,
@@ -175,122 +124,113 @@ func LoadCryptoConfig(envPath string) (CryptoConfig, error) {
 	}, nil
 }
 
-// LoadServerConfig loads the .env file (if present) and builds a validated
-// ServerConfig strictly from environment variables.
+// LoadCryptoConfig loads Argon2id and password-length settings.
+func LoadCryptoConfig(envPath string) (CryptoConfig, error) {
+	s, err := loadSettings(envPath)
+	if err != nil {
+		return CryptoConfig{}, err
+	}
+	return cryptoFromSettings(s)
+}
+
+func resolveMTLS(s *settings) (bool, error) {
+	if s.explicit("mtls") {
+		return s.boolVal("mtls")
+	}
+	return false, nil
+}
+
+func resolveTailscale(s *settings) (bool, error) {
+	if s.explicit("tailscale") {
+		return s.boolVal("tailscale")
+	}
+	return tailscaleStatePresent(firstNonEmpty(s.get("tailscale_state_dir"), DefaultTailscaleStateDir)), nil
+}
+
+// LoadServerConfig merges defaults, .sylva/config, and .env allowlist.
 func LoadServerConfig(envPath string) (ServerConfig, error) {
-	if envPath != "" {
-		if err := LoadDotEnv(envPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return ServerConfig{}, err
-		}
+	s, err := loadSettings(envPath)
+	if err != nil {
+		return ServerConfig{}, err
 	}
 
-	host, err := requireEnv("SYLVA_HOST")
-	if err != nil {
-		return ServerConfig{}, err
+	host := s.get("host")
+	port := s.get("port")
+	if host == "" || port == "" {
+		return ServerConfig{}, fmt.Errorf("host and port are required (set them in .env or .sylva/config)")
 	}
-	port, err := requireEnv("SYLVA_PORT")
-	if err != nil {
-		return ServerConfig{}, err
-	}
-	listenAddr := os.Getenv("SYLVA_SERVER_ADDR")
+	listenAddr := s.get("server_addr")
 	if listenAddr == "" {
 		listenAddr = net.JoinHostPort(host, port)
 	}
 
-	serviceName, err := requireEnv("SYLVA_SERVICE_NAME")
+	logLevel, err := parseLogLevel(s.get("log_level"))
 	if err != nil {
 		return ServerConfig{}, err
 	}
-	version, err := requireEnv("SYLVA_VERSION")
+	readHeaderTimeout, err := s.durationVal("server_read_header_timeout")
+	if err != nil {
+		return ServerConfig{}, err
+	}
+	readTimeout, err := s.durationVal("server_read_timeout")
+	if err != nil {
+		return ServerConfig{}, err
+	}
+	writeTimeout, err := s.durationVal("server_write_timeout")
+	if err != nil {
+		return ServerConfig{}, err
+	}
+	idleTimeout, err := s.durationVal("server_idle_timeout")
+	if err != nil {
+		return ServerConfig{}, err
+	}
+	shutdownTimeout, err := s.durationVal("server_shutdown_timeout")
+	if err != nil {
+		return ServerConfig{}, err
+	}
+	maxBodyBytes, err := s.int64Val("max_body_bytes")
+	if err != nil {
+		return ServerConfig{}, err
+	}
+	sqliteBusyTimeout, err := s.durationVal("sqlite_busy_timeout")
+	if err != nil {
+		return ServerConfig{}, err
+	}
+	recordInitialVersion, err := s.intVal("record_initial_version")
 	if err != nil {
 		return ServerConfig{}, err
 	}
 
-	logLevelStr, err := requireEnv("SYLVA_LOG_LEVEL")
+	caCertPath := firstNonEmpty(s.get("ca_cert_path"), DefaultCACertPath)
+	serverCertPath := firstNonEmpty(s.get("server_cert_path"), DefaultServerCertPath)
+	serverKeyPath := firstNonEmpty(s.get("server_key_path"), DefaultServerKeyPath)
+	enableMTLS, err := resolveMTLS(s)
 	if err != nil {
 		return ServerConfig{}, err
 	}
-	logLevel, err := parseLogLevel(logLevelStr)
-	if err != nil {
-		return ServerConfig{}, err
-	}
-
-	readHeaderTimeout, err := requireDurationEnv("SYLVA_SERVER_READ_HEADER_TIMEOUT")
-	if err != nil {
-		return ServerConfig{}, err
-	}
-	readTimeout, err := requireDurationEnv("SYLVA_SERVER_READ_TIMEOUT")
-	if err != nil {
-		return ServerConfig{}, err
-	}
-	writeTimeout, err := requireDurationEnv("SYLVA_SERVER_WRITE_TIMEOUT")
-	if err != nil {
-		return ServerConfig{}, err
-	}
-	idleTimeout, err := requireDurationEnv("SYLVA_SERVER_IDLE_TIMEOUT")
-	if err != nil {
-		return ServerConfig{}, err
-	}
-	shutdownTimeout, err := requireDurationEnv("SYLVA_SERVER_SHUTDOWN_TIMEOUT")
-	if err != nil {
-		return ServerConfig{}, err
-	}
-
-	enableMTLS, err := requireBoolEnv("SYLVA_MTLS_ENABLED")
-	if err != nil {
-		return ServerConfig{}, err
-	}
-	caCertPath := strings.TrimSpace(os.Getenv("SYLVA_CA_CERT_PATH"))
-	serverCertPath := strings.TrimSpace(os.Getenv("SYLVA_SERVER_CERT_PATH"))
-	serverKeyPath := strings.TrimSpace(os.Getenv("SYLVA_SERVER_KEY_PATH"))
 	if enableMTLS {
-		caCertPath, err = requireEnv("SYLVA_CA_CERT_PATH")
-		if err != nil {
-			return ServerConfig{}, err
-		}
-		serverCertPath, err = requireEnv("SYLVA_SERVER_CERT_PATH")
-		if err != nil {
-			return ServerConfig{}, err
-		}
-		serverKeyPath, err = requireEnv("SYLVA_SERVER_KEY_PATH")
-		if err != nil {
+		if err := requireExistingFiles("server", caCertPath, serverCertPath, serverKeyPath); err != nil {
 			return ServerConfig{}, err
 		}
 	}
-	enableTailscale, err := requireBoolEnv("SYLVA_TAILSCALE_ENABLED")
-	if err != nil {
-		return ServerConfig{}, err
-	}
-	apiPrefix, err := requireEnv("SYLVA_API_PREFIX")
-	if err != nil {
-		return ServerConfig{}, err
-	}
-	dbPath, err := requireEnv("SYLVA_SERVER_DB_PATH")
-	if err != nil {
-		return ServerConfig{}, err
-	}
-	maxBodyBytes, err := requireInt64Env("SYLVA_MAX_BODY_BYTES")
-	if err != nil {
-		return ServerConfig{}, err
-	}
-	sqliteBusyTimeout, err := requireDurationEnv("SYLVA_SQLITE_BUSY_TIMEOUT")
-	if err != nil {
-		return ServerConfig{}, err
-	}
-	recordInitialVersion, err := requireIntEnv("SYLVA_RECORD_INITIAL_VERSION")
+
+	tailscaleNode := firstNonEmpty(s.get("tailscale_node"), DefaultTailscaleNode)
+	tailscaleStateDir := firstNonEmpty(s.get("tailscale_state_dir"), DefaultTailscaleStateDir)
+	tailscaleAuthKey := firstNonEmpty(s.get("tailscale_authkey"), readOptionalFile(DefaultTailscaleAuthKeyFile))
+	enableTailscale, err := resolveTailscale(s)
 	if err != nil {
 		return ServerConfig{}, err
 	}
 
 	return ServerConfig{
-		ServiceName:          serviceName,
-		Version:              version,
+		ServiceName:          firstNonEmpty(s.get("service_name"), "sylvad"),
+		Version:              s.get("version"),
 		LogLevel:             logLevel,
 		Host:                 host,
 		Port:                 port,
 		ListenAddr:           listenAddr,
-		APIPrefix:            strings.TrimRight(apiPrefix, "/"),
-		DBPath:               dbPath,
+		APIPrefix:            strings.TrimRight(s.get("api_prefix"), "/"),
+		DBPath:               s.get("server_db_path"),
 		MaxBodyBytes:         maxBodyBytes,
 		SQLiteBusyTimeout:    sqliteBusyTimeout,
 		RecordInitialVersion: recordInitialVersion,
@@ -304,162 +244,115 @@ func LoadServerConfig(envPath string) (ServerConfig, error) {
 		ServerCertPath:       serverCertPath,
 		ServerKeyPath:        serverKeyPath,
 		EnableTailscale:      enableTailscale,
-		TailscaleNode:        os.Getenv("SYLVA_TAILSCALE_NODE"),
+		TailscaleNode:        tailscaleNode,
+		TailscaleStateDir:    tailscaleStateDir,
+		TailscaleAuthKey:     tailscaleAuthKey,
+		TailscaleTags:        splitCommaList(s.get("tailscale_tags")),
 	}, nil
 }
 
-// LoadClientConfig loads the .env file (if present) and builds a validated
-// ClientConfig strictly from environment variables.
+// LoadClientConfig merges defaults, .sylva/config, and .env allowlist.
 func LoadClientConfig(envPath string) (ClientConfig, error) {
-	if envPath != "" {
-		if err := LoadDotEnv(envPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return ClientConfig{}, err
-		}
-	}
-
-	version, err := requireEnv("SYLVA_VERSION")
-	if err != nil {
-		return ClientConfig{}, err
-	}
-	scheme, err := requireEnv("SYLVA_SCHEME")
-	if err != nil {
-		return ClientConfig{}, err
-	}
-	host, err := requireEnv("SYLVA_HOST")
-	if err != nil {
-		return ClientConfig{}, err
-	}
-	port, err := requireEnv("SYLVA_PORT")
+	s, err := loadSettings(envPath)
 	if err != nil {
 		return ClientConfig{}, err
 	}
 
-	serverURL := os.Getenv("SYLVA_SERVER_URL")
+	scheme := s.get("scheme")
+	host := s.get("host")
+	port := s.get("port")
+	if host == "" || port == "" {
+		return ClientConfig{}, fmt.Errorf("host and port are required (set them in .env or .sylva/config)")
+	}
+	serverURL := s.get("server_url")
 	if serverURL == "" {
 		serverURL = fmt.Sprintf("%s://%s", scheme, net.JoinHostPort(host, port))
 	}
 
-	timeout, err := requireDurationEnv("SYLVA_CLIENT_TIMEOUT")
+	timeout, err := s.durationVal("client_timeout")
 	if err != nil {
 		return ClientConfig{}, err
 	}
-	maxBodyBytes, err := requireInt64Env("SYLVA_MAX_BODY_BYTES")
+	maxBodyBytes, err := s.int64Val("max_body_bytes")
 	if err != nil {
 		return ClientConfig{}, err
 	}
-	enableMTLS, err := requireBoolEnv("SYLVA_MTLS_ENABLED")
+	cacheEnabled, err := s.boolVal("client_cache_enabled")
 	if err != nil {
 		return ClientConfig{}, err
 	}
-	caCertPath := strings.TrimSpace(os.Getenv("SYLVA_CA_CERT_PATH"))
-	clientCertPath := strings.TrimSpace(os.Getenv("SYLVA_CLIENT_CERT_PATH"))
-	clientKeyPath := strings.TrimSpace(os.Getenv("SYLVA_CLIENT_KEY_PATH"))
-	if enableMTLS {
-		if !strings.EqualFold(scheme, "https") {
-			return ClientConfig{}, fmt.Errorf("SYLVA_SCHEME must be https when SYLVA_MTLS_ENABLED is true")
-		}
-		caCertPath, err = requireEnv("SYLVA_CA_CERT_PATH")
-		if err != nil {
-			return ClientConfig{}, err
-		}
-		clientCertPath, err = requireEnv("SYLVA_CLIENT_CERT_PATH")
-		if err != nil {
-			return ClientConfig{}, err
-		}
-		clientKeyPath, err = requireEnv("SYLVA_CLIENT_KEY_PATH")
-		if err != nil {
-			return ClientConfig{}, err
-		}
-	}
-	apiPrefix, err := requireEnv("SYLVA_API_PREFIX")
+	sqliteBusyTimeout, err := s.durationVal("sqlite_busy_timeout")
 	if err != nil {
 		return ClientConfig{}, err
 	}
-	cacheEnabled, err := requireBoolEnv("SYLVA_CLIENT_CACHE_ENABLED")
+	recordInitialVersion, err := s.intVal("record_initial_version")
 	if err != nil {
 		return ClientConfig{}, err
 	}
-	cachePath, err := requireEnv("SYLVA_CLIENT_CACHE_PATH")
+	clipboardClearAfter, err := s.durationVal("clipboard_clear_after")
 	if err != nil {
 		return ClientConfig{}, err
 	}
-	recordInitialVersion, err := requireIntEnv("SYLVA_RECORD_INITIAL_VERSION")
+	agentEnabled, err := s.boolVal("agent_enabled")
 	if err != nil {
 		return ClientConfig{}, err
 	}
-	sqliteBusyTimeout, err := requireDurationEnv("SYLVA_SQLITE_BUSY_TIMEOUT")
+	logLevel, err := parseLogLevel(s.get("log_level"))
 	if err != nil {
 		return ClientConfig{}, err
 	}
-	clipboardClearAfter, err := requireDurationEnv("SYLVA_CLIPBOARD_CLEAR_AFTER")
+	keyringEnabled, err := s.boolVal("keyring_enabled")
 	if err != nil {
 		return ClientConfig{}, err
 	}
-	clipboardBackend, err := requireEnv("SYLVA_CLIPBOARD_BACKEND")
-	if err != nil {
-		return ClientConfig{}, err
-	}
-	agentEnabled, err := requireBoolEnv("SYLVA_AGENT_ENABLED")
-	if err != nil {
-		return ClientConfig{}, err
-	}
-	agentSocketPath, err := requireEnv("SYLVA_AGENT_SOCKET_PATH")
-	if err != nil {
-		return ClientConfig{}, err
-	}
-	agentLogPath, err := requireEnv("SYLVA_AGENT_LOG_PATH")
-	if err != nil {
-		return ClientConfig{}, err
-	}
-	logLevelStr, err := requireEnv("SYLVA_LOG_LEVEL")
-	if err != nil {
-		return ClientConfig{}, err
-	}
-	logLevel, err := parseLogLevel(logLevelStr)
-	if err != nil {
-		return ClientConfig{}, err
-	}
-	keyringEnabled, err := requireBoolEnv("SYLVA_KEYRING_ENABLED")
-	if err != nil {
-		return ClientConfig{}, err
-	}
-	keyringService, err := requireEnv("SYLVA_KEYRING_SERVICE")
-	if err != nil {
-		return ClientConfig{}, err
-	}
-	keyringUser, err := requireEnv("SYLVA_KEYRING_USER")
-	if err != nil {
-		return ClientConfig{}, err
-	}
-	cryptoCfg, err := LoadCryptoConfig("")
+	cryptoCfg, err := cryptoFromSettings(s)
 	if err != nil {
 		return ClientConfig{}, err
 	}
 
+	caCertPath := firstNonEmpty(s.get("ca_cert_path"), DefaultCACertPath)
+	clientCertPath := firstNonEmpty(s.get("client_cert_path"), DefaultClientCertPath)
+	clientKeyPath := firstNonEmpty(s.get("client_key_path"), DefaultClientKeyPath)
+	enableMTLS, err := resolveMTLS(s)
+	if err != nil {
+		return ClientConfig{}, err
+	}
+	if enableMTLS {
+		scheme = "https"
+		if err := requireExistingFiles("client", caCertPath, clientCertPath, clientKeyPath); err != nil {
+			return ClientConfig{}, err
+		}
+		if s.get("server_url") == "" {
+			serverURL = fmt.Sprintf("%s://%s", scheme, net.JoinHostPort(host, port))
+		} else if strings.HasPrefix(strings.ToLower(serverURL), "http://") {
+			serverURL = "https://" + serverURL[len("http://"):]
+		}
+	}
+
 	return ClientConfig{
-		Version:              version,
+		Version:              s.get("version"),
 		Scheme:               scheme,
 		Host:                 host,
 		Port:                 port,
 		ServerURL:            serverURL,
-		APIPrefix:            strings.TrimRight(apiPrefix, "/"),
+		APIPrefix:            strings.TrimRight(s.get("api_prefix"), "/"),
 		Timeout:              timeout,
 		MaxBodyBytes:         maxBodyBytes,
 		CacheEnabled:         cacheEnabled,
-		CachePath:            cachePath,
+		CachePath:            s.get("client_cache_path"),
 		SQLiteBusyTimeout:    sqliteBusyTimeout,
 		RecordInitialVersion: recordInitialVersion,
-		MasterPassphrase:     os.Getenv("SYLVA_MASTER_PASSPHRASE"),
+		MasterPassphrase:     s.get("master_passphrase"),
 		ClipboardClearAfter:  clipboardClearAfter,
-		ClipboardBackend:     strings.ToLower(strings.TrimSpace(clipboardBackend)),
-		ClipboardFile:        os.Getenv("SYLVA_CLIPBOARD_FILE"),
+		ClipboardBackend:     strings.ToLower(s.get("clipboard_backend")),
+		ClipboardFile:        s.get("clipboard_file"),
 		AgentEnabled:         agentEnabled,
-		AgentSocketPath:      agentSocketPath,
-		AgentLogPath:         agentLogPath,
+		AgentSocketPath:      s.get("agent_socket_path"),
+		AgentLogPath:         s.get("agent_log_path"),
 		LogLevel:             logLevel,
 		KeyringEnabled:       keyringEnabled,
-		KeyringService:       keyringService,
-		KeyringUser:          keyringUser,
+		KeyringService:       s.get("keyring_service"),
+		KeyringUser:          s.get("keyring_user"),
 		ConfigPath:           envPath,
 		EnableMTLS:           enableMTLS,
 		CACertPath:           caCertPath,
@@ -467,86 +360,6 @@ func LoadClientConfig(envPath string) (ClientConfig, error) {
 		ClientKeyPath:        clientKeyPath,
 		Crypto:               cryptoCfg,
 	}, nil
-}
-
-func requireEnv(key string) (string, error) {
-	val := strings.TrimSpace(os.Getenv(key))
-	if val == "" {
-		return "", fmt.Errorf("required environment variable %s is not set (check .env)", key)
-	}
-	return val, nil
-}
-
-func requireDurationEnv(key string) (time.Duration, error) {
-	raw, err := requireEnv(key)
-	if err != nil {
-		return 0, err
-	}
-	d, err := time.ParseDuration(raw)
-	if err != nil {
-		return 0, fmt.Errorf("invalid duration for %s=%q: %w", key, raw, err)
-	}
-	return d, nil
-}
-
-func requireBoolEnv(key string) (bool, error) {
-	raw, err := requireEnv(key)
-	if err != nil {
-		return false, err
-	}
-	b, err := strconv.ParseBool(raw)
-	if err != nil {
-		return false, fmt.Errorf("invalid boolean for %s=%q: %w", key, raw, err)
-	}
-	return b, nil
-}
-
-func requireInt64Env(key string) (int64, error) {
-	raw, err := requireEnv(key)
-	if err != nil {
-		return 0, err
-	}
-	n, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("invalid integer for %s=%q: %w", key, raw, err)
-	}
-	return n, nil
-}
-
-func requireIntEnv(key string) (int, error) {
-	raw, err := requireEnv(key)
-	if err != nil {
-		return 0, err
-	}
-	n, err := strconv.Atoi(raw)
-	if err != nil {
-		return 0, fmt.Errorf("invalid integer for %s=%q: %w", key, raw, err)
-	}
-	return n, nil
-}
-
-func requireUint32Env(key string) (uint32, error) {
-	raw, err := requireEnv(key)
-	if err != nil {
-		return 0, err
-	}
-	n, err := strconv.ParseUint(raw, 10, 32)
-	if err != nil {
-		return 0, fmt.Errorf("invalid uint32 for %s=%q: %w", key, raw, err)
-	}
-	return uint32(n), nil
-}
-
-func requireUint8Env(key string) (uint8, error) {
-	raw, err := requireEnv(key)
-	if err != nil {
-		return 0, err
-	}
-	n, err := strconv.ParseUint(raw, 10, 8)
-	if err != nil {
-		return 0, fmt.Errorf("invalid uint8 for %s=%q: %w", key, raw, err)
-	}
-	return uint8(n), nil
 }
 
 func parseLogLevel(raw string) (slog.Level, error) {
@@ -560,6 +373,21 @@ func parseLogLevel(raw string) (slog.Level, error) {
 	case "error":
 		return slog.LevelError, nil
 	default:
-		return slog.LevelInfo, fmt.Errorf("invalid SYLVA_LOG_LEVEL %q (expected debug, info, warn, error)", raw)
+		return slog.LevelInfo, fmt.Errorf("invalid log_level %q (expected debug, info, warn, error)", raw)
 	}
+}
+
+func splitCommaList(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

@@ -14,7 +14,7 @@ Use a private CA. Do not put these certificates on a public CA.
 
 Keep the CA private key offline after you issue certs. Mode `600` on keys.
 
-The server certificate **SAN must match** `SYLVA_HOST` (the host in the client URL). `127.0.0.1` needs an IP SAN. `localhost` or a Docker name like `sylvad` needs a DNS SAN.
+The server certificate **SAN must match** the host in the client URL (`SYLVA_HOST` / `host` in config). `127.0.0.1` needs an IP SAN. `localhost` or a Docker name like `sylvad` needs a DNS SAN.
 
 ## Issue a local CA and a pair of certs
 
@@ -58,25 +58,32 @@ rm -f server.csr client.csr server.ext client.ext
 
 A second machine gets **its own** client cert from the same CA. Copy `ca.pem` plus that client pair; never reuse `server.key` on the CLI host unless it is the same machine.
 
-## `.env`
+## Enable once
+
+Certificates default to `.sylva/certs/` as in the commands above. After they exist:
 
 ```bash
-SYLVA_SCHEME=https
-SYLVA_HOST=127.0.0.1
-SYLVA_PORT=8443
-SYLVA_MTLS_ENABLED=true
-SYLVA_CA_CERT_PATH=.sylva/certs/ca.pem
-SYLVA_SERVER_CERT_PATH=.sylva/certs/server.pem
-SYLVA_SERVER_KEY_PATH=.sylva/certs/server.key
-SYLVA_CLIENT_CERT_PATH=.sylva/certs/client.pem
-SYLVA_CLIENT_KEY_PATH=.sylva/certs/client.key
+./bin/sylva enable mtls
+# restart sylvad
+./bin/sylvad
+./bin/sylva ping
 ```
 
-Both binaries read the same file. Extra paths on one side are ignored.
+That writes `mtls=true` to `.sylva/config`. The client scheme becomes `https` automatically. Leftover cert files do **not** turn mTLS on by themselves (a previous test CA would surprise you). `sylva disable mtls` turns it off without deleting the files.
+
+Optional path overrides in `.sylva/config` if you keep certs elsewhere:
+
+```
+ca_cert_path=.sylva/certs/ca.pem
+server_cert_path=.sylva/certs/server.pem
+server_key_path=.sylva/certs/server.key
+client_cert_path=.sylva/certs/client.pem
+client_key_path=.sylva/certs/client.key
+```
+
+Both binaries read the same files. Extra paths on one side are ignored.
 
 Use the same `SYLVA_PORT` as plaintext (default `8443`). mTLS is a mode on that listener, not a second port. Stop the HTTP `sylvad` before starting the mTLS one; two processes cannot bind the same address. Do not multiplex plain HTTP and mTLS on one socket: the first bytes are either an HTTP request or a TLS handshake, and serving both would let anyone skip the client certificate.
-
-`./bin/sylvad -mtls` only sets the enable flag. Certificate paths must still be in the environment; empty paths fail closed.
 
 ## Check
 
@@ -89,16 +96,16 @@ Use the same `SYLVA_PORT` as plaintext (default `8443`). mTLS is a mode on that 
 
 ## Enabling mTLS later
 
-`sylvad` does not speak HTTP and mTLS on the same listener, and it does not upgrade an existing HTTP session. You start without TLS, later set `SYLVA_MTLS_ENABLED=true`, put cert paths in `.env`, set `SYLVA_SCHEME=https`, **restart** `sylvad`. From that moment every new TCP connection must finish TLS 1.3 with a client certificate **before** any vault request. The previous HTTP client is not “detected later”; it is a new connection that already fails.
+`sylvad` does not speak HTTP and mTLS on the same listener, and it does not upgrade an existing HTTP session. You start without TLS, later `sylva enable mtls` and **restart** `sylvad`. From that moment every new TCP connection must finish TLS 1.3 with a client certificate **before** any vault request. The previous HTTP client is not “detected later”; it is a new connection that already fails.
 
 | What the old client still does | What you see | What it means |
 | --- | --- | --- |
-| `SYLVA_SCHEME=http` (plaintext) | `sylvad is in HTTPS/mTLS mode but this client sent HTTP` | First bytes were `GET`, not a TLS ClientHello. The server never asked for a certificate. |
+| Client still on HTTP (`scheme=http`) | `sylvad is in HTTPS/mTLS mode but this client sent HTTP` | First bytes were `GET`, not a TLS ClientHello. The server never asked for a certificate. |
 | `https` without your CA | `this client does not trust sylvad's certificate` | TLS started, but the private CA is not in the system trust store. |
 | CA present, no client cert | `sylvad requires a client certificate (mTLS)` | Handshake reached TLS; the server sent `certificate_required` and closed. No JSON body. |
 | Client cert from another CA | untrusted CA, or `sylvad rejected this client certificate` | CA files must match on both sides. |
 
-`sylva` prints that reason on stderr (and points at this page). Fix the **client** `.env` the same way as the server, then `sylva ping`. Vault data in SQLite does not change; only the transport does.
+`sylva` prints that reason on stderr (and points at this page). Run `sylva enable mtls` on the client machine too, then `sylva ping`. Vault data in SQLite does not change; only the transport does.
 
 ## Docker
 
@@ -106,4 +113,4 @@ Compose talks to the daemon as hostname `sylvad`. Add `DNS:sylvad` to the server
 
 ## Limits
 
-mTLS is not Tailscale. It does not punch NAT or assign a mesh IP. It only proves the TCP peer holds a cert you issued. The vault key is still derived from the master passphrase.
+mTLS is not Tailscale. It does not punch NAT or assign a mesh IP. It only proves the TCP peer holds a cert you issued. The vault key is still derived from the master passphrase. Mesh listen: [tailscale.md](tailscale.md).
