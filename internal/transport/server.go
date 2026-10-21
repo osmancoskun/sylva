@@ -50,6 +50,7 @@ func NewServer(cfg config.ServerConfig, store storage.Store, logger *slog.Logger
 		api.EndpointPing:         s.handlePing,
 		api.EndpointHealthz:      s.handlePing,
 		api.EndpointPutRecord:    s.handlePutRecord,
+		api.EndpointUpdateRecord: s.handleUpdateRecord,
 		api.EndpointGetRecord:    s.handleGetRecordByID,
 		api.EndpointDeleteRecord: s.handleDeleteRecord,
 		api.EndpointListRecords:  s.handleListRecords,

@@ -93,6 +93,15 @@ func (c *Client) PutRecord(ctx context.Context, rec *vault.EncryptedRecord) (*va
 	return &out, nil
 }
 
+// UpdateRecord replaces an existing encrypted record on the server.
+func (c *Client) UpdateRecord(ctx context.Context, rec *vault.EncryptedRecord) (*vault.EncryptedRecord, error) {
+	var out vault.EncryptedRecord
+	if err := c.doJSON(ctx, http.MethodPut, c.apiURL(api.RecordPath(rec.ID)), rec, http.StatusOK, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // GetRecord loads an encrypted record by ID.
 func (c *Client) GetRecord(ctx context.Context, id string) (*vault.EncryptedRecord, error) {
 	var out vault.EncryptedRecord

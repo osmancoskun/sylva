@@ -36,6 +36,39 @@ func (s *Server) handlePutRecord(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, rec)
 }
 
+func (s *Server) handleUpdateRecord(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(w, r.Body, s.cfg.MaxBodyBytes)
+
+	id := r.PathValue(api.ParamID)
+	var rec vault.EncryptedRecord
+	if err := json.NewDecoder(r.Body).Decode(&rec); err != nil {
+		writeJSON(w, http.StatusBadRequest, api.ErrorBody{Error: "invalid encrypted record payload"})
+		return
+	}
+	if rec.ID == "" {
+		rec.ID = id
+	}
+	if rec.ID != id || rec.BlindIndex == "" || rec.Type == "" {
+		writeJSON(w, http.StatusBadRequest, api.ErrorBody{Error: "record id, type, and blind_index are required"})
+		return
+	}
+
+	if err := s.store.Update(r.Context(), &rec); err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			writeStorageError(w, err)
+			return
+		}
+		if errors.Is(err, storage.ErrConflict) {
+			writeJSON(w, http.StatusConflict, api.ErrorBody{Error: api.ErrorRecordExists})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, api.ErrorBody{Error: "failed to persist record"})
+		return
+	}
+	writeJSON(w, http.StatusOK, rec)
+}
+
 func (s *Server) handleGetRecordByID(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue(api.ParamID)
 	rec, err := s.store.GetByID(r.Context(), id)

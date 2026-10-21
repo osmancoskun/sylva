@@ -159,6 +159,26 @@ func TestVaultSaltAndRecordRoundTrip(t *testing.T) {
 		t.Fatalf("password mismatch %q", unsealed.Login.Password)
 	}
 
+	unsealed.Login.Password = "updated-secret"
+	resealed, err := vault.Seal(masterKey, unsealed, fetched.Version+1)
+	if err != nil {
+		t.Fatalf("seal update: %v", err)
+	}
+	if _, err := client.UpdateRecord(ctx, resealed); err != nil {
+		t.Fatalf("update record: %v", err)
+	}
+	fetched, err = client.GetRecordByBlindIndex(ctx, stored.BlindIndex)
+	if err != nil {
+		t.Fatalf("get after update: %v", err)
+	}
+	unsealed, err = vault.Unseal(masterKey, fetched)
+	if err != nil {
+		t.Fatalf("unseal after update: %v", err)
+	}
+	if unsealed.Login.Password != "updated-secret" {
+		t.Fatalf("updated password %q", unsealed.Login.Password)
+	}
+
 	listed, err := client.ListRecords(ctx, vault.SecretTypeLogin)
 	if err != nil {
 		t.Fatalf("list: %v", err)

@@ -31,6 +31,7 @@ const (
 	EndpointPing         = "ping"
 	EndpointHealthz      = "healthz"
 	EndpointPutRecord    = "records.put"
+	EndpointUpdateRecord = "records.update"
 	EndpointGetRecord    = "records.get"
 	EndpointDeleteRecord = "records.delete"
 	EndpointListRecords  = "records.list"
@@ -56,6 +57,7 @@ func HTTPEndpoints() []Endpoint {
 		{Name: EndpointPing, Method: http.MethodGet, Path: PathPing, Prefixed: true},
 		{Name: EndpointHealthz, Method: http.MethodGet, Path: PathHealthz, Prefixed: false},
 		{Name: EndpointPutRecord, Method: http.MethodPut, Path: PathRecords, Prefixed: true},
+		{Name: EndpointUpdateRecord, Method: http.MethodPut, Path: PathRecordID, Prefixed: true},
 		{Name: EndpointGetRecord, Method: http.MethodGet, Path: PathRecordID, Prefixed: true},
 		{Name: EndpointDeleteRecord, Method: http.MethodDelete, Path: PathRecordID, Prefixed: true},
 		{Name: EndpointListRecords, Method: http.MethodGet, Path: PathRecords, Prefixed: true},
