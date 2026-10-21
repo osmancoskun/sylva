@@ -46,3 +46,20 @@ func TestMissingRequiredEnvFails(t *testing.T) {
 		t.Fatalf("expected error when required env variables are missing, got nil")
 	}
 }
+
+func TestMTLSRequiresCertificatePaths(t *testing.T) {
+	envPath := filepath.Join("..", "..", ".env.example")
+	t.Setenv("SYLVA_MTLS_ENABLED", "true")
+	t.Setenv("SYLVA_CA_CERT_PATH", "")
+	t.Setenv("SYLVA_SERVER_CERT_PATH", "")
+	t.Setenv("SYLVA_SERVER_KEY_PATH", "")
+	if _, err := config.LoadServerConfig(envPath); err == nil {
+		t.Fatal("expected server config to require mTLS certificate paths")
+	}
+
+	t.Setenv("SYLVA_CLIENT_CERT_PATH", "")
+	t.Setenv("SYLVA_CLIENT_KEY_PATH", "")
+	if _, err := config.LoadClientConfig(envPath); err == nil {
+		t.Fatal("expected client config to require https and mTLS certificate paths")
+	}
+}

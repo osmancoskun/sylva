@@ -240,6 +240,23 @@ func LoadServerConfig(envPath string) (ServerConfig, error) {
 	if err != nil {
 		return ServerConfig{}, err
 	}
+	caCertPath := strings.TrimSpace(os.Getenv("SYLVA_CA_CERT_PATH"))
+	serverCertPath := strings.TrimSpace(os.Getenv("SYLVA_SERVER_CERT_PATH"))
+	serverKeyPath := strings.TrimSpace(os.Getenv("SYLVA_SERVER_KEY_PATH"))
+	if enableMTLS {
+		caCertPath, err = requireEnv("SYLVA_CA_CERT_PATH")
+		if err != nil {
+			return ServerConfig{}, err
+		}
+		serverCertPath, err = requireEnv("SYLVA_SERVER_CERT_PATH")
+		if err != nil {
+			return ServerConfig{}, err
+		}
+		serverKeyPath, err = requireEnv("SYLVA_SERVER_KEY_PATH")
+		if err != nil {
+			return ServerConfig{}, err
+		}
+	}
 	enableTailscale, err := requireBoolEnv("SYLVA_TAILSCALE_ENABLED")
 	if err != nil {
 		return ServerConfig{}, err
@@ -283,9 +300,9 @@ func LoadServerConfig(envPath string) (ServerConfig, error) {
 		IdleTimeout:          idleTimeout,
 		ShutdownTimeout:      shutdownTimeout,
 		EnableMTLS:           enableMTLS,
-		CACertPath:           os.Getenv("SYLVA_CA_CERT_PATH"),
-		ServerCertPath:       os.Getenv("SYLVA_SERVER_CERT_PATH"),
-		ServerKeyPath:        os.Getenv("SYLVA_SERVER_KEY_PATH"),
+		CACertPath:           caCertPath,
+		ServerCertPath:       serverCertPath,
+		ServerKeyPath:        serverKeyPath,
 		EnableTailscale:      enableTailscale,
 		TailscaleNode:        os.Getenv("SYLVA_TAILSCALE_NODE"),
 	}, nil
@@ -333,6 +350,26 @@ func LoadClientConfig(envPath string) (ClientConfig, error) {
 	enableMTLS, err := requireBoolEnv("SYLVA_MTLS_ENABLED")
 	if err != nil {
 		return ClientConfig{}, err
+	}
+	caCertPath := strings.TrimSpace(os.Getenv("SYLVA_CA_CERT_PATH"))
+	clientCertPath := strings.TrimSpace(os.Getenv("SYLVA_CLIENT_CERT_PATH"))
+	clientKeyPath := strings.TrimSpace(os.Getenv("SYLVA_CLIENT_KEY_PATH"))
+	if enableMTLS {
+		if !strings.EqualFold(scheme, "https") {
+			return ClientConfig{}, fmt.Errorf("SYLVA_SCHEME must be https when SYLVA_MTLS_ENABLED is true")
+		}
+		caCertPath, err = requireEnv("SYLVA_CA_CERT_PATH")
+		if err != nil {
+			return ClientConfig{}, err
+		}
+		clientCertPath, err = requireEnv("SYLVA_CLIENT_CERT_PATH")
+		if err != nil {
+			return ClientConfig{}, err
+		}
+		clientKeyPath, err = requireEnv("SYLVA_CLIENT_KEY_PATH")
+		if err != nil {
+			return ClientConfig{}, err
+		}
 	}
 	apiPrefix, err := requireEnv("SYLVA_API_PREFIX")
 	if err != nil {
@@ -425,9 +462,9 @@ func LoadClientConfig(envPath string) (ClientConfig, error) {
 		KeyringUser:          keyringUser,
 		ConfigPath:           envPath,
 		EnableMTLS:           enableMTLS,
-		CACertPath:           os.Getenv("SYLVA_CA_CERT_PATH"),
-		ClientCertPath:       os.Getenv("SYLVA_CLIENT_CERT_PATH"),
-		ClientKeyPath:        os.Getenv("SYLVA_CLIENT_KEY_PATH"),
+		CACertPath:           caCertPath,
+		ClientCertPath:       clientCertPath,
+		ClientKeyPath:        clientKeyPath,
 		Crypto:               cryptoCfg,
 	}, nil
 }
