@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/osman/sylva/internal/config"
@@ -399,6 +400,101 @@ func (v *Vault) PutSecret(ctx context.Context, item *vault.SecretItem) error {
 	return v.createRecord(ctx, item)
 }
 
+// ListSecrets unseals stored secrets, optionally filtered by type. Payloads are included; the CLI must not print them.
+func (v *Vault) ListSecrets(ctx context.Context, secretType vault.SecretType) ([]*vault.SecretItem, error) {
+	if err := v.requireUnlocked(); err != nil {
+		return nil, err
+	}
+	recs, err := v.listRecords(ctx, secretType)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]*vault.SecretItem, 0, len(recs))
+	for _, rec := range recs {
+		item, err := vault.Unseal(v.masterKey, rec)
+		if err != nil {
+			return nil, fmt.Errorf("unseal %s: %w", rec.ID, err)
+		}
+		items = append(items, item)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		li, lj := secretLabel(items[i].Type), secretLabel(items[j].Type)
+		if li != lj {
+			return li < lj
+		}
+		return items[i].Identifier < items[j].Identifier
+	})
+	return items, nil
+}
+
+// DeleteSecret removes the stored secret of this type and identifier.
+func (v *Vault) DeleteSecret(ctx context.Context, secretType vault.SecretType, identifier string) error {
+	if err := v.requireUnlocked(); err != nil {
+		return err
+	}
+	if secretType == vault.SecretTypeLogin {
+		norm, err := tree.NormalizeDomain(identifier)
+		if err != nil {
+			return err
+		}
+		identifier = norm
+	}
+	rec, err := v.getByIdentifier(ctx, secretType, identifier)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			return fmt.Errorf("%w: no %s secret named %s", storage.ErrNotFound, secretLabel(secretType), identifier)
+		}
+		return err
+	}
+	if err := v.remote.DeleteRecord(ctx, rec.ID); err != nil {
+		return err
+	}
+	if v.cache != nil {
+		_ = v.cache.Delete(ctx, rec.ID)
+	}
+	return nil
+}
+
+// UpdateSecret replaces the stored secret with the same type and identifier.
+func (v *Vault) UpdateSecret(ctx context.Context, item *vault.SecretItem) error {
+	if err := v.requireUnlocked(); err != nil {
+		return err
+	}
+	if item == nil {
+		return errors.New("secret item is required")
+	}
+	if item.Type == vault.SecretTypeLogin {
+		norm, err := tree.NormalizeDomain(item.Identifier)
+		if err != nil {
+			return err
+		}
+		item.Identifier = norm
+		if item.Login != nil {
+			item.Login.Domain = norm
+		}
+	}
+	existing, err := v.getByIdentifier(ctx, item.Type, item.Identifier)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			return fmt.Errorf("%w: no %s secret named %s", storage.ErrNotFound, secretLabel(item.Type), item.Identifier)
+		}
+		return err
+	}
+	item.ID = existing.ID
+	if unsealed, unsealErr := vault.Unseal(v.masterKey, existing); unsealErr == nil {
+		item.CreatedAt = unsealed.CreatedAt
+	}
+	sealed, err := vault.Seal(v.masterKey, item, existing.Version+1)
+	if err != nil {
+		return err
+	}
+	if _, err := v.remote.UpdateRecord(ctx, sealed); err != nil {
+		return err
+	}
+	v.cacheReplace(ctx, sealed)
+	return nil
+}
+
 // SecretExists reports whether a secret of this type and identifier is already stored.
 func (v *Vault) SecretExists(ctx context.Context, secretType vault.SecretType, identifier string) (bool, error) {
 	if err := v.requireUnlocked(); err != nil {
@@ -497,12 +593,21 @@ func (v *Vault) putRecord(ctx context.Context, rec *vault.EncryptedRecord) error
 	return nil
 }
 
+func (v *Vault) cacheReplace(ctx context.Context, rec *vault.EncryptedRecord) {
+	if v.cache == nil {
+		return
+	}
+	if err := v.cache.Update(ctx, rec); err != nil {
+		_ = v.cache.Put(ctx, rec)
+	}
+}
+
 func (v *Vault) listRecords(ctx context.Context, secretType vault.SecretType) ([]*vault.EncryptedRecord, error) {
 	recs, err := v.remote.ListRecords(ctx, secretType)
 	if err == nil {
 		if v.cache != nil {
 			for _, rec := range recs {
-				_ = v.cache.Put(ctx, rec)
+				v.cacheReplace(ctx, rec)
 			}
 		}
 		return recs, nil
@@ -520,9 +625,7 @@ func (v *Vault) getByIdentifier(ctx context.Context, secretType vault.SecretType
 	}
 	rec, err := v.remote.GetRecordByBlindIndex(ctx, idx)
 	if err == nil {
-		if v.cache != nil {
-			_ = v.cache.Put(ctx, rec)
-		}
+		v.cacheReplace(ctx, rec)
 		return rec, nil
 	}
 	if v.cache == nil {

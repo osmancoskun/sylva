@@ -176,4 +176,32 @@ func TestLoginSetGetInheritanceThroughServer(t *testing.T) {
 	if err == nil || !errors.Is(err, storage.ErrNotFound) {
 		t.Fatalf("expected missing probe, got kind=%q secret=%q err=%v", kind, secret, err)
 	}
+
+	listed, err := v.ListSecrets(ctx, "")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(listed) < 4 {
+		t.Fatalf("expected at least 4 secrets, got %d", len(listed))
+	}
+
+	tokenItem, err := v.GetSecret(ctx, vault.SecretTypeToken, "github-token")
+	if err != nil {
+		t.Fatalf("get token for update: %v", err)
+	}
+	tokenItem.Token.Token = "tok-updated"
+	if err := v.UpdateSecret(ctx, tokenItem); err != nil {
+		t.Fatalf("update token: %v", err)
+	}
+	kind, secret, err = v.GetValue(ctx, "github-token", vault.SecretTypeToken, false, "")
+	if err != nil || secret != "tok-updated" {
+		t.Fatalf("get after update: kind=%q secret=%q err=%v", kind, secret, err)
+	}
+
+	if err := v.DeleteSecret(ctx, vault.SecretTypeToken, "github-token"); err != nil {
+		t.Fatalf("delete token: %v", err)
+	}
+	if _, _, err := v.GetValue(ctx, "github-token", vault.SecretTypeToken, false, ""); err == nil || !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("expected missing after delete, got %v", err)
+	}
 }
