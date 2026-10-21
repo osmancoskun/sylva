@@ -3,6 +3,10 @@ BINARY_DAEMON := sylvad
 BUILD_DIR := bin
 GO := go
 GOFLAGS :=
+# Isolated BuildKit cannot resolve proxy.golang.org on this host; classic
+# builder honors compose `build.network: host`.
+export DOCKER_BUILDKIT := 0
+export COMPOSE_BAKE := false
 DOCKER_COMPOSE := docker compose
 
 .PHONY: all build build-cli build-daemon test vet check clean docker-test docker-smoke docker-down

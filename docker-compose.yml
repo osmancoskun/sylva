@@ -2,23 +2,14 @@ services:
   test:
     build:
       context: .
+      network: host
       target: test
-      args:
-        GO_IMAGE: ${SYLVA_DOCKER_GO_IMAGE}
-        TEST_IMAGE: ${SYLVA_DOCKER_TEST_IMAGE}
-        RUNTIME_IMAGE: ${SYLVA_DOCKER_RUNTIME_IMAGE}
-        GOTOOLCHAIN: ${SYLVA_GOTOOLCHAIN}
-    env_file:
-      - .env
 
   sylvad:
     build:
       context: .
+      network: host
       target: sylvad
-      args:
-        GO_IMAGE: ${SYLVA_DOCKER_GO_IMAGE}
-        TEST_IMAGE: ${SYLVA_DOCKER_TEST_IMAGE}
-        RUNTIME_IMAGE: ${SYLVA_DOCKER_RUNTIME_IMAGE}
     env_file:
       - .env
     environment:
@@ -27,18 +18,15 @@ services:
     volumes:
       - sylvad-data:/data
     ports:
-      - "${SYLVA_HOST}:${SYLVA_PORT}:${SYLVA_PORT}"
+      - "${SYLVA_PORT}:${SYLVA_PORT}"
     networks:
       - sylva-net
 
   sylva:
     build:
       context: .
+      network: host
       target: sylva
-      args:
-        GO_IMAGE: ${SYLVA_DOCKER_GO_IMAGE}
-        TEST_IMAGE: ${SYLVA_DOCKER_TEST_IMAGE}
-        RUNTIME_IMAGE: ${SYLVA_DOCKER_RUNTIME_IMAGE}
     env_file:
       - .env
     environment:

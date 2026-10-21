@@ -1,5 +1,5 @@
-ARG GO_IMAGE=golang:1.26-alpine
-ARG TEST_IMAGE=golang:1.26
+ARG GO_IMAGE=golang:1.26.10-alpine
+ARG TEST_IMAGE=golang:1.26.10
 ARG RUNTIME_IMAGE=alpine:3.21
 
 # Stage 1: Base toolchain and module cache (alpine, used to produce static binaries)
@@ -11,7 +11,7 @@ COPY . .
 
 # Stage 2: Isolated analysis + race detector (glibc image; alpine/musl cannot race)
 FROM ${TEST_IMAGE} AS test
-ARG GOTOOLCHAIN=auto
+ARG GOTOOLCHAIN=local
 ENV GOTOOLCHAIN=${GOTOOLCHAIN}
 WORKDIR /src
 COPY go.mod go.sum ./
