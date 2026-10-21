@@ -203,7 +203,7 @@ func copyToClipboard(cfg config.ClientConfig, secretType, identifier, secret str
 	}
 	defer clip.Close()
 	if clip.HoldsUntilClear() {
-		return errors.New("os clipboard requires SYLVA_AGENT_ENABLED=true so `sylva cp` can exit while the session agent holds the selection")
+		return errors.New("os clipboard requires SYLVA_AGENT_ENABLED=true so `sylva get` can exit while the session agent holds the selection")
 	}
 	if err := clip.Copy(secret); err != nil {
 		return err

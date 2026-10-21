@@ -40,10 +40,9 @@ docker-smoke:
 		sleep 0.3; \
 	done
 	$(DOCKER_COMPOSE) run --rm --no-deps sylva init
-	$(DOCKER_COMPOSE) run --rm --no-deps sylva login set company.com --username osman --password company-secret
-	$(DOCKER_COMPOSE) run --rm --no-deps sylva login set mail.company.com --username osman --inherit
-	$(DOCKER_COMPOSE) run --rm --no-deps sylva login get mail.company.com --reveal
-	$(DOCKER_COMPOSE) run --rm --no-deps sylva cp mail.company.com
+	$(DOCKER_COMPOSE) run --rm --no-deps sylva set company.com company-secret
+	$(DOCKER_COMPOSE) run --rm --no-deps sylva set mail.company.com --inherit
+	$(DOCKER_COMPOSE) run --rm --no-deps sylva get mail.company.com
 	$(DOCKER_COMPOSE) down --remove-orphans
 
 docker-down:

@@ -29,9 +29,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  unlock               Unlock the session agent / OS keyring\n")
 		fmt.Fprintf(os.Stderr, "  lock                 Wipe the session agent / OS keyring\n")
 		fmt.Fprintf(os.Stderr, "  agent                Run the local session agent (foreground)\n")
-		fmt.Fprintf(os.Stderr, "  login set <domain>   Store login credentials (use --inherit or --separate)\n")
-		fmt.Fprintf(os.Stderr, "  login get <domain>   Resolve login credentials\n")
-		fmt.Fprintf(os.Stderr, "  cp <domain>          Copy a login password to the clipboard\n\n")
+		fmt.Fprintf(os.Stderr, "  set [<id> [<password>] [<type>]]\n")
+		fmt.Fprintf(os.Stderr, "                       Store a secret (interactive if args are omitted)\n")
+		fmt.Fprintf(os.Stderr, "  get <domain>         Copy a login password to the clipboard\n\n")
 		fmt.Fprintf(os.Stderr, "Flags:\n")
 		flag.PrintDefaults()
 	}
@@ -79,17 +79,17 @@ func main() {
 		if err := runAgent(cfg); err != nil {
 			fatal(err)
 		}
-	case "login":
-		if err := runLogin(cfg, args[1:]); err != nil {
+	case "set":
+		if err := runSet(cfg, args[1:]); err != nil {
 			fatal(err)
 		}
-	case "cp", "copy":
-		if err := runCopy(cfg, args[1:]); err != nil {
+	case "get", "cp", "copy":
+		if err := runGet(cfg, args[1:]); err != nil {
 			fatal(err)
 		}
 	default:
 		if strings.Contains(cmd, ".") {
-			if err := runCopy(cfg, args); err != nil {
+			if err := runGet(cfg, args); err != nil {
 				fatal(err)
 			}
 			return
@@ -140,40 +140,17 @@ func runInit(cfg config.ClientConfig) error {
 	return nil
 }
 
-func runLogin(cfg config.ClientConfig, args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("login requires a subcommand: set or get")
-	}
-
-	v, err := openUnlocked(cfg)
-	if err != nil {
-		return err
-	}
-	defer v.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), cfg.Timeout)
-	defer cancel()
-
-	switch args[0] {
-	case "set":
-		return runLoginSet(ctx, v, args[1:])
-	case "get":
-		return runLoginGet(ctx, v, args[1:])
-	default:
-		return fmt.Errorf("unknown login subcommand %q", args[0])
-	}
-}
-
-func runCopy(cfg config.ClientConfig, args []string) error {
-	fs := flag.NewFlagSet("cp", flag.ContinueOnError)
+func runGet(cfg config.ClientConfig, args []string) error {
+	fs := flag.NewFlagSet("get", flag.ContinueOnError)
 	cascade := fs.Bool("cascade", false, "walk up the domain tree when the exact domain is not stored")
-	domain, flagArgs := splitDomainAndFlags(args)
+	pos, flagArgs := splitFlagsAndArgs(args)
 	if err := fs.Parse(flagArgs); err != nil {
 		return err
 	}
-	if domain == "" || fs.NArg() != 0 {
-		return fmt.Errorf("usage: sylva cp [flags] <domain>")
+	if len(pos) != 1 {
+		return fmt.Errorf("usage: sylva get <domain>")
 	}
+	domain := pos[0]
 
 	v, err := openUnlocked(cfg)
 	if err != nil {
@@ -194,64 +171,7 @@ func runCopy(cfg config.ClientConfig, args []string) error {
 	return copyToClipboard(cfg, string(vault.SecretTypeLogin), domain, res.Item.Login.Password)
 }
 
-func runLoginSet(ctx context.Context, v *sylva.Vault, args []string) error {
-	fs := flag.NewFlagSet("login set", flag.ContinueOnError)
-	username := fs.String("username", "", "account username")
-	password := fs.String("password", "", "account password (required unless --inherit)")
-	inherit := fs.Bool("inherit", false, "inherit credentials from the nearest parent domain")
-	separate := fs.Bool("separate", false, "store a separate password even if a parent domain exists")
-	domain, flagArgs := splitDomainAndFlags(args)
-	if err := fs.Parse(flagArgs); err != nil {
-		return err
-	}
-	if domain == "" || fs.NArg() != 0 {
-		return fmt.Errorf("usage: sylva login set [flags] <domain>")
-	}
-
-	res, err := v.LoginSet(ctx, domain, *username, *password, *inherit, *separate)
-	if err != nil {
-		return err
-	}
-	if res.Inherited {
-		fmt.Printf("Stored %s (inherits from %s)\n", res.RequestedDomain, res.ResolvedDomain)
-		return nil
-	}
-	fmt.Printf("Stored %s\n", res.RequestedDomain)
-	return nil
-}
-
-func runLoginGet(ctx context.Context, v *sylva.Vault, args []string) error {
-	fs := flag.NewFlagSet("login get", flag.ContinueOnError)
-	cascade := fs.Bool("cascade", false, "walk up the domain tree when the exact domain is not stored")
-	reveal := fs.Bool("reveal", false, "print the password instead of hiding it")
-	domain, flagArgs := splitDomainAndFlags(args)
-	if err := fs.Parse(flagArgs); err != nil {
-		return err
-	}
-	if domain == "" || fs.NArg() != 0 {
-		return fmt.Errorf("usage: sylva login get [flags] <domain>")
-	}
-
-	res, err := v.LoginGet(ctx, domain, *cascade)
-	if err != nil {
-		return err
-	}
-
-	fmt.Printf("Domain:    %s\n", res.RequestedDomain)
-	fmt.Printf("Resolved:  %s\n", res.ResolvedDomain)
-	fmt.Printf("Inherited: %t\n", res.Inherited)
-	fmt.Printf("Username:  %s\n", res.Item.Login.Username)
-	if *reveal {
-		fmt.Printf("Password:  %s\n", res.Item.Login.Password)
-	} else {
-		fmt.Printf("Password:  (hidden; pass --reveal to print)\n")
-	}
-	return nil
-}
-
-func splitDomainAndFlags(args []string) (string, []string) {
-	var domain string
-	var flags []string
+func splitFlagsAndArgs(args []string) (positionals, flags []string) {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if strings.HasPrefix(arg, "-") {
@@ -262,20 +182,16 @@ func splitDomainAndFlags(args []string) (string, []string) {
 			}
 			continue
 		}
-		if domain == "" {
-			domain = arg
-			continue
-		}
-		flags = append(flags, arg)
+		positionals = append(positionals, arg)
 	}
-	return domain, flags
+	return positionals, flags
 }
 
 func isBoolFlag(arg string) bool {
 	name := strings.TrimLeft(arg, "-")
 	name, _, _ = strings.Cut(name, "=")
 	switch name {
-	case "inherit", "separate", "cascade", "reveal":
+	case "inherit", "cascade":
 		return true
 	default:
 		return false
