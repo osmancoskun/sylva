@@ -1,8 +1,8 @@
 // Package config provides centralized environment-driven configuration loading
 // for both the Sylva client (sylva) and server daemon (sylvad).
-// All runtime parameters—including network addresses, ports, timeouts, and
-// security toggles—are loaded from a .env file or OS environment variables
-// without hardcoded static values in application packages.
+// All runtime parameters—including network addresses, ports, timeouts, KDF
+// settings, and security toggles—are loaded from a .env file or OS environment
+// variables without hardcoded static values in application packages.
 package config
 
 import (
@@ -16,6 +16,17 @@ import (
 	"strings"
 	"time"
 )
+
+// CryptoConfig holds centralized parameters for Argon2id key derivation and
+// password generation loaded from environment configuration.
+type CryptoConfig struct {
+	KDFTime            uint32
+	KDFMemoryKB        uint32
+	KDFThreads         uint8
+	KDFKeyLen          uint32
+	KDFSaltLen         int
+	PasswordDefaultLen int
+}
 
 // ServerConfig holds runtime configuration for the sylvad server daemon.
 type ServerConfig struct {
@@ -51,6 +62,7 @@ type ClientConfig struct {
 	CACertPath       string
 	ClientCertPath   string
 	ClientKeyPath    string
+	Crypto           CryptoConfig
 }
 
 // LoadDotEnv reads key=value pairs from the specified file path and populates
@@ -96,6 +108,49 @@ func LoadDotEnv(path string) error {
 		return fmt.Errorf("scan env file %s: %w", path, err)
 	}
 	return nil
+}
+
+// LoadCryptoConfig loads and validates cryptographic parameters from the environment.
+func LoadCryptoConfig(envPath string) (CryptoConfig, error) {
+	if envPath != "" {
+		if err := LoadDotEnv(envPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return CryptoConfig{}, err
+		}
+	}
+
+	kdfTime, err := requireUint32Env("SYLVA_KDF_TIME")
+	if err != nil {
+		return CryptoConfig{}, err
+	}
+	kdfMemoryKB, err := requireUint32Env("SYLVA_KDF_MEMORY_KB")
+	if err != nil {
+		return CryptoConfig{}, err
+	}
+	kdfThreads, err := requireUint8Env("SYLVA_KDF_THREADS")
+	if err != nil {
+		return CryptoConfig{}, err
+	}
+	kdfKeyLen, err := requireUint32Env("SYLVA_KDF_KEY_LEN")
+	if err != nil {
+		return CryptoConfig{}, err
+	}
+	kdfSaltLen, err := requireIntEnv("SYLVA_KDF_SALT_LEN")
+	if err != nil {
+		return CryptoConfig{}, err
+	}
+	pwdDefaultLen, err := requireIntEnv("SYLVA_PASSWORD_DEFAULT_LEN")
+	if err != nil {
+		return CryptoConfig{}, err
+	}
+
+	return CryptoConfig{
+		KDFTime:            kdfTime,
+		KDFMemoryKB:        kdfMemoryKB,
+		KDFThreads:         kdfThreads,
+		KDFKeyLen:          kdfKeyLen,
+		KDFSaltLen:         kdfSaltLen,
+		PasswordDefaultLen: pwdDefaultLen,
+	}, nil
 }
 
 // LoadServerConfig loads the .env file (if present) and builds a validated
@@ -232,6 +287,10 @@ func LoadClientConfig(envPath string) (ClientConfig, error) {
 	if err != nil {
 		return ClientConfig{}, err
 	}
+	cryptoCfg, err := LoadCryptoConfig("")
+	if err != nil {
+		return ClientConfig{}, err
+	}
 
 	return ClientConfig{
 		Version:          version,
@@ -245,6 +304,7 @@ func LoadClientConfig(envPath string) (ClientConfig, error) {
 		CACertPath:       os.Getenv("SYLVA_CA_CERT_PATH"),
 		ClientCertPath:   os.Getenv("SYLVA_CLIENT_CERT_PATH"),
 		ClientKeyPath:    os.Getenv("SYLVA_CLIENT_KEY_PATH"),
+		Crypto:           cryptoCfg,
 	}, nil
 }
 
@@ -290,6 +350,42 @@ func requireInt64Env(key string) (int64, error) {
 		return 0, fmt.Errorf("invalid integer for %s=%q: %w", key, raw, err)
 	}
 	return n, nil
+}
+
+func requireIntEnv(key string) (int, error) {
+	raw, err := requireEnv(key)
+	if err != nil {
+		return 0, err
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("invalid integer for %s=%q: %w", key, raw, err)
+	}
+	return n, nil
+}
+
+func requireUint32Env(key string) (uint32, error) {
+	raw, err := requireEnv(key)
+	if err != nil {
+		return 0, err
+	}
+	n, err := strconv.ParseUint(raw, 10, 32)
+	if err != nil {
+		return 0, fmt.Errorf("invalid uint32 for %s=%q: %w", key, raw, err)
+	}
+	return uint32(n), nil
+}
+
+func requireUint8Env(key string) (uint8, error) {
+	raw, err := requireEnv(key)
+	if err != nil {
+		return 0, err
+	}
+	n, err := strconv.ParseUint(raw, 10, 8)
+	if err != nil {
+		return 0, fmt.Errorf("invalid uint8 for %s=%q: %w", key, raw, err)
+	}
+	return uint8(n), nil
 }
 
 func parseLogLevel(raw string) (slog.Level, error) {
