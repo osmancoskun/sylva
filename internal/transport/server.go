@@ -30,6 +30,7 @@ type Server struct {
 	httpServer *http.Server
 	logger     *slog.Logger
 	startedAt  time.Time
+	tsClose    func() error
 }
 
 // NewServer creates and configures a new transport Server instance.
@@ -89,20 +90,50 @@ func (s *Server) listenTLS(ln net.Listener) (net.Listener, error) {
 
 // Start begins listening and serving requests until the provided context is canceled.
 func (s *Server) Start(ctx context.Context) error {
-	ln, err := net.Listen("tcp", s.cfg.ListenAddr)
-	if err != nil {
-		return fmt.Errorf("listen on %s: %w", s.cfg.ListenAddr, err)
+	var ln net.Listener
+	var err error
+	if s.cfg.EnableTailscale {
+		ln, s.tsClose, err = openTailscaleListener(ctx, s.cfg, s.logger)
+		if err != nil {
+			return err
+		}
+		// Same-host CLI traffic to the tsnet IP hairpins through kernel
+		// tailscale0 and usually times out. Also bind loopback for local sylva.
+		loopAddr := net.JoinHostPort("127.0.0.1", s.cfg.Port)
+		localLn, localErr := net.Listen("tcp", loopAddr)
+		if localErr != nil {
+			s.logger.Warn("tailscale local loopback listen failed",
+				slog.String("addr", loopAddr),
+				slog.Any("error", localErr),
+			)
+		} else {
+			s.logger.Info("also listening", slog.String("addr", localLn.Addr().String()))
+			ln = mergeListeners(ln, localLn)
+		}
+	} else {
+		ln, err = net.Listen("tcp", s.cfg.ListenAddr)
+		if err != nil {
+			return fmt.Errorf("listen on %s: %w", s.cfg.ListenAddr, err)
+		}
 	}
 
 	return s.Serve(ctx, ln)
 }
 
+func (s *Server) closeTailscale() {
+	if s.tsClose == nil {
+		return
+	}
+	if err := s.tsClose(); err != nil {
+		s.logger.Error("tailscale close", slog.Any("error", err))
+	}
+	s.tsClose = nil
+}
+
 // Serve accepts incoming connections on the provided listener and performs a
 // graceful shutdown when ctx is canceled.
 func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
-	if s.cfg.EnableTailscale {
-		return fmt.Errorf("tailscale is not implemented")
-	}
+	defer s.closeTailscale()
 
 	serveLn := ln
 	if s.cfg.EnableMTLS {
@@ -136,6 +167,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 		if err := s.httpServer.Shutdown(shutdownCtx); err != nil {
 			return fmt.Errorf("server shutdown: %w", err)
 		}
+		s.closeTailscale()
 		return nil
 	case err := <-errCh:
 		return err
