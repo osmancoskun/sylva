@@ -87,6 +87,53 @@ func TestParseSetArgs(t *testing.T) {
 	}
 }
 
+func TestParseGetArgs(t *testing.T) {
+	t.Parallel()
+
+	id, typ, err := parseGetArgs([]string{"SYLVA_EXAMPLE", "env"}, "")
+	if err != nil {
+		t.Fatalf("parseGetArgs: %v", err)
+	}
+	if id != "SYLVA_EXAMPLE" || typ != "env" {
+		t.Fatalf("got id=%q type=%q", id, typ)
+	}
+
+	id, typ, err = parseGetArgs([]string{"github-token"}, "")
+	if err != nil {
+		t.Fatalf("parseGetArgs: %v", err)
+	}
+	if id != "github-token" || typ != "" {
+		t.Fatalf("got id=%q type=%q", id, typ)
+	}
+
+	if _, _, err := parseGetArgs(nil, ""); err == nil {
+		t.Fatal("expected usage error")
+	}
+}
+
+func TestResolveGetType(t *testing.T) {
+	t.Parallel()
+
+	kind, err := resolveGetType("")
+	if err != nil || kind != "" {
+		t.Fatalf("probe: %q %v", kind, err)
+	}
+	kind, err = resolveGetType("ssh")
+	if err != nil || kind != vault.SecretTypeSSH {
+		t.Fatalf("ssh: %q %v", kind, err)
+	}
+}
+
+func TestLooksLikeIP(t *testing.T) {
+	t.Parallel()
+	if !looksLikeIP("10.0.0.1") || !looksLikeIP("::1") {
+		t.Fatal("expected IPs to match")
+	}
+	if looksLikeIP("company.com") || looksLikeIP("github-token") {
+		t.Fatal("expected hostnames to stay non-IP")
+	}
+}
+
 func TestLooksLikeHost(t *testing.T) {
 	t.Parallel()
 	if !looksLikeHost("company.com") || !looksLikeHost("10.0.0.1") || !looksLikeHost("::1") {

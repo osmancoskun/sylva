@@ -43,6 +43,12 @@ docker-smoke:
 	$(DOCKER_COMPOSE) run --rm --no-deps sylva set company.com company-secret
 	$(DOCKER_COMPOSE) run --rm --no-deps sylva set mail.company.com --inherit
 	$(DOCKER_COMPOSE) run --rm --no-deps sylva get mail.company.com
+	$(DOCKER_COMPOSE) run --rm --no-deps sylva set github-token tokensecret
+	$(DOCKER_COMPOSE) run --rm --no-deps sylva get github-token
+	$(DOCKER_COMPOSE) run --rm --no-deps sylva set SYLVA_EXAMPLE envsecret env
+	$(DOCKER_COMPOSE) run --rm --no-deps sylva get SYLVA_EXAMPLE env
+	$(DOCKER_COMPOSE) run --rm --no-deps sylva set 10.0.0.1 sshsecret ssh
+	$(DOCKER_COMPOSE) run --rm --no-deps sylva get 10.0.0.1 ssh
 	$(DOCKER_COMPOSE) down --remove-orphans
 
 docker-down:

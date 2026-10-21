@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 
 	sylva "github.com/osman/sylva/internal/client"
@@ -114,6 +115,9 @@ func resolveSetType(raw, identifier string, wizard bool) (vault.SecretType, erro
 		}
 		return kind, nil
 	}
+	if looksLikeIP(identifier) {
+		return promptSecretType(identifier, []vault.SecretType{vault.SecretTypeLogin, vault.SecretTypeSSH})
+	}
 	if identifier != "" {
 		if looksLikeHost(identifier) {
 			return vault.SecretTypeLogin, nil
@@ -123,27 +127,70 @@ func resolveSetType(raw, identifier string, wizard bool) (vault.SecretType, erro
 	if !wizard {
 		return vault.SecretTypeToken, nil
 	}
-	fmt.Println("What are you adding?")
-	fmt.Println("  1) password")
-	fmt.Println("  2) domain")
-	fmt.Println("  3) env")
-	fmt.Println("  4) ssh")
+	return promptSecretType("this", nil)
+}
+
+func promptSecretType(identifier string, allowed []vault.SecretType) (vault.SecretType, error) {
+	if len(allowed) == 0 {
+		allowed = []vault.SecretType{
+			vault.SecretTypeToken,
+			vault.SecretTypeLogin,
+			vault.SecretTypeEnv,
+			vault.SecretTypeSSH,
+		}
+	}
+	if identifier == "this" {
+		fmt.Println("What are you adding?")
+	} else {
+		fmt.Printf("What is %s?\n", identifier)
+	}
+	for i, kind := range allowed {
+		fmt.Printf("  %d) %s\n", i+1, secretTypeLabel(kind))
+	}
 	raw, err := promptLine("Type: ")
 	if err != nil {
 		return "", err
 	}
-	kind, err := parseKnownType(strings.TrimSpace(raw))
+	raw = strings.TrimSpace(raw)
+	if n, convErr := strconv.Atoi(raw); convErr == nil && n >= 1 && n <= len(allowed) {
+		return allowed[n-1], nil
+	}
+	kind, err := parseKnownType(raw)
 	if err != nil {
 		return "", fmt.Errorf("unknown type %q (password, domain, env, ssh)", raw)
 	}
-	return kind, nil
+	for _, allowedKind := range allowed {
+		if kind == allowedKind {
+			return kind, nil
+		}
+	}
+	return "", fmt.Errorf("unknown type %q (password, domain, env, ssh)", raw)
+}
+
+func secretTypeLabel(kind vault.SecretType) string {
+	switch kind {
+	case vault.SecretTypeToken:
+		return "password"
+	case vault.SecretTypeLogin:
+		return "domain"
+	case vault.SecretTypeEnv:
+		return "env"
+	case vault.SecretTypeSSH:
+		return "ssh"
+	default:
+		return string(kind)
+	}
 }
 
 func looksLikeHost(s string) bool {
-	if net.ParseIP(s) != nil {
+	if looksLikeIP(s) {
 		return true
 	}
 	return strings.Contains(s, ".")
+}
+
+func looksLikeIP(s string) bool {
+	return net.ParseIP(s) != nil
 }
 
 func setLogin(ctx context.Context, v *sylva.Vault, domain, username, password string, inherit, wizard bool) error {

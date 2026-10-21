@@ -12,7 +12,6 @@ import (
 	sylva "github.com/osman/sylva/internal/client"
 	"github.com/osman/sylva/internal/config"
 	"github.com/osman/sylva/internal/transport"
-	"github.com/osman/sylva/internal/vault"
 )
 
 func main() {
@@ -31,7 +30,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  agent                Run the local session agent (foreground)\n")
 		fmt.Fprintf(os.Stderr, "  set [<id> [<password>] [<type>]]\n")
 		fmt.Fprintf(os.Stderr, "                       Store a secret (interactive if args are omitted)\n")
-		fmt.Fprintf(os.Stderr, "  get <domain>         Copy a login password to the clipboard\n\n")
+		fmt.Fprintf(os.Stderr, "  get <id> [<type>]    Copy a secret to the clipboard\n\n")
 		fmt.Fprintf(os.Stderr, "Flags:\n")
 		flag.PrintDefaults()
 	}
@@ -138,37 +137,6 @@ func runInit(cfg config.ClientConfig) error {
 	}
 	fmt.Printf("Vault initialized (%d-byte Argon2id salt is stored on the server)\n", len(salt))
 	return nil
-}
-
-func runGet(cfg config.ClientConfig, args []string) error {
-	fs := flag.NewFlagSet("get", flag.ContinueOnError)
-	cascade := fs.Bool("cascade", false, "walk up the domain tree when the exact domain is not stored")
-	pos, flagArgs := splitFlagsAndArgs(args)
-	if err := fs.Parse(flagArgs); err != nil {
-		return err
-	}
-	if len(pos) != 1 {
-		return fmt.Errorf("usage: sylva get <domain>")
-	}
-	domain := pos[0]
-
-	v, err := openUnlocked(cfg)
-	if err != nil {
-		return err
-	}
-	defer v.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), cfg.Timeout)
-	defer cancel()
-
-	res, err := v.LoginGet(ctx, domain, *cascade)
-	if err != nil {
-		return err
-	}
-	if res.Item == nil || res.Item.Login == nil {
-		return fmt.Errorf("resolved login for %s has no password", domain)
-	}
-	return copyToClipboard(cfg, string(vault.SecretTypeLogin), domain, res.Item.Login.Password)
 }
 
 func splitFlagsAndArgs(args []string) (positionals, flags []string) {
