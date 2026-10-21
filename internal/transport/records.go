@@ -27,7 +27,7 @@ func (s *Server) handlePutRecord(w http.ResponseWriter, r *http.Request) {
 
 	if err := s.store.Put(r.Context(), &rec); err != nil {
 		if errors.Is(err, storage.ErrConflict) {
-			writeJSON(w, http.StatusConflict, api.ErrorBody{Error: err.Error()})
+			writeJSON(w, http.StatusConflict, api.ErrorBody{Error: api.ErrorRecordExists})
 			return
 		}
 		writeJSON(w, http.StatusInternalServerError, api.ErrorBody{Error: "failed to persist record"})

@@ -11,8 +11,36 @@ import (
 
 	"github.com/osman/sylva/internal/api"
 	"github.com/osman/sylva/internal/config"
+	"github.com/osman/sylva/internal/storage"
 	"github.com/osman/sylva/internal/vault"
 )
+
+// HTTPError is a non-success HTTP response from sylvad.
+type HTTPError struct {
+	Status int
+	Body   string
+}
+
+func (e *HTTPError) Error() string {
+	if e == nil {
+		return "http error"
+	}
+	return fmt.Sprintf("unexpected status %d: %s", e.Status, e.Body)
+}
+
+func (e *HTTPError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	switch e.Status {
+	case http.StatusConflict:
+		return storage.ErrConflict
+	case http.StatusNotFound:
+		return storage.ErrNotFound
+	default:
+		return nil
+	}
+}
 
 // Client communicates with a remote or local sylvad server.
 type Client struct {
@@ -56,7 +84,7 @@ func (c *Client) Ping(ctx context.Context) (*StatusResponse, error) {
 	return &status, nil
 }
 
-// PutRecord upserts an encrypted record on the server.
+// PutRecord stores a new encrypted record on the server.
 func (c *Client) PutRecord(ctx context.Context, rec *vault.EncryptedRecord) (*vault.EncryptedRecord, error) {
 	var out vault.EncryptedRecord
 	if err := c.doJSON(ctx, http.MethodPut, c.apiURL(api.PathRecords), rec, http.StatusOK, &out); err != nil {
@@ -155,10 +183,10 @@ func (c *Client) doJSON(ctx context.Context, method, reqURL string, in any, want
 	}
 
 	if wantStatus != 0 && resp.StatusCode != wantStatus {
-		return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return &HTTPError{Status: resp.StatusCode, Body: strings.TrimSpace(string(body))}
 	}
 	if wantStatus == 0 && resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return &HTTPError{Status: resp.StatusCode, Body: strings.TrimSpace(string(body))}
 	}
 	if out == nil || resp.StatusCode == http.StatusNoContent || len(body) == 0 {
 		return nil

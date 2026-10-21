@@ -2,6 +2,7 @@ package transport_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -139,6 +140,11 @@ func TestVaultSaltAndRecordRoundTrip(t *testing.T) {
 	stored, err := client.PutRecord(ctx, sealed)
 	if err != nil {
 		t.Fatalf("put record: %v", err)
+	}
+
+	_, err = client.PutRecord(ctx, sealed)
+	if err == nil || !errors.Is(err, storage.ErrConflict) {
+		t.Fatalf("expected conflict on duplicate record, got %v", err)
 	}
 
 	fetched, err := client.GetRecordByBlindIndex(ctx, stored.BlindIndex)

@@ -104,6 +104,11 @@ type StatusResponse struct {
 	Timestamp time.Time `json:"timestamp"`
 }
 
+// Stable error strings returned in ErrorBody.Error.
+const (
+	ErrorRecordExists = "record already exists"
+)
+
 // ErrorBody is the standard HTTP error payload.
 type ErrorBody struct {
 	Error string `json:"error"`
