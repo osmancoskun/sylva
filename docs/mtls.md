@@ -1,6 +1,6 @@
 # mTLS setup
 
-mTLS authenticates the **transport**. It does not replace the vault passphrase. The server still only stores ciphertext. With mTLS on, `sylvad` rejects connections that lack a client certificate signed by your CA. TLS is 1.3 only.
+Start on localhost HTTP first: [setup.md](setup.md). mTLS authenticates the **transport**. It does not replace the vault passphrase. The server still only stores ciphertext. With mTLS on, `sylvad` rejects connections that lack a client certificate signed by your CA. TLS is 1.3 only.
 
 Use a private CA. Do not put these certificates on a public CA.
 
