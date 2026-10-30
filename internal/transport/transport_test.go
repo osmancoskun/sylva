@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -170,6 +171,14 @@ func TestVaultSaltAndRecordRoundTrip(t *testing.T) {
 	}
 	if _, err := client.UpdateRecord(ctx, resealed); err != nil {
 		t.Fatalf("update record: %v", err)
+	}
+	if _, err := client.UpdateRecord(ctx, resealed); !errors.Is(err, storage.ErrVersionConflict) {
+		t.Fatalf("expected version conflict on replayed update, got %v", err)
+	} else {
+		var he *transport.HTTPError
+		if !errors.As(err, &he) || he.Status != http.StatusConflict || !strings.Contains(he.Body, "fetch it again") {
+			t.Fatalf("expected actionable HTTP 409 for stale update, got %v", err)
+		}
 	}
 	fetched, err = client.GetRecordByBlindIndex(ctx, stored.BlindIndex)
 	if err != nil {

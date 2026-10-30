@@ -119,6 +119,9 @@ func TestSealAndUnsealAllSecretTypes(t *testing.T) {
 		if unsealed.Identifier != item.Identifier || unsealed.Type != item.Type {
 			t.Errorf("unsealed item mismatch: got %+v, want %+v", unsealed, item)
 		}
+		if unsealed.Version != rec.Version {
+			t.Fatalf("unsealed source version = %d, want %d", unsealed.Version, rec.Version)
+		}
 
 		// Verify that swapping metadata (e.g., Version or BlindIndex) on the server invalidates decryption via AAD.
 		tampered := *rec

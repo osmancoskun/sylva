@@ -87,6 +87,8 @@ Passphrase unlock and session-agent key reuse both require the server's verifier
 
 `get` copies to the clipboard (it does not print the secret). If the type is omitted, Sylva probes every kind and asks when the match is empty or ambiguous.
 
+Updates carry the version that was read before editing. The server atomically accepts only the next version; if another device has already changed that record, the update fails with HTTP 409 and asks you to fetch it again. Sylva does not automatically retry a stale edit or merge it over newer data. A deleted and recreated identifier has a different record ID, so an old edit cannot replace it. Upgrade both the server and clients to use this behavior.
+
 Clipboard backends: `auto` (X11 or Wayland), `os`, `memory`, `file`. `auto`/`os` need the agent. Docker smoke uses `memory`.
 
 ## Same machine settings on two hosts

@@ -111,22 +111,15 @@ func (s *SQLiteStore) Put(ctx context.Context, rec *vault.EncryptedRecord) error
 	return nil
 }
 
-// Update replaces an existing record by ID. Missing IDs return ErrNotFound.
+// Update atomically replaces version N with N+1. Stale or skipped versions
+// return ErrVersionConflict; missing IDs return ErrNotFound.
 func (s *SQLiteStore) Update(ctx context.Context, rec *vault.EncryptedRecord) error {
 	if rec == nil {
 		return errors.New("encrypted record cannot be nil")
 	}
 
-	if _, err := s.GetByID(ctx, rec.ID); err != nil {
-		return err
-	}
-
-	existing, err := s.GetByBlindIndex(ctx, rec.BlindIndex)
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		return err
-	}
-	if err == nil && existing.ID != rec.ID {
-		return fmt.Errorf("%w: record already exists", ErrConflict)
+	if rec.Version <= 1 {
+		return ErrVersionConflict
 	}
 
 	res, err := s.db.ExecContext(ctx, `
@@ -138,8 +131,8 @@ func (s *SQLiteStore) Update(ctx context.Context, rec *vault.EncryptedRecord) er
 			ciphertext=?,
 			version=?,
 			updated_at=?
-		WHERE id=?
-	`, string(rec.Type), rec.BlindIndex, rec.ParentBlindIndex, rec.Envelope.Nonce, rec.Envelope.Ciphertext, rec.Version, rec.UpdatedAt.UTC().Format(time.RFC3339Nano), rec.ID)
+		WHERE id=? AND version=?
+	`, string(rec.Type), rec.BlindIndex, rec.ParentBlindIndex, rec.Envelope.Nonce, rec.Envelope.Ciphertext, rec.Version, rec.UpdatedAt.UTC().Format(time.RFC3339Nano), rec.ID, rec.Version-1)
 	if err != nil {
 		if isUniqueConstraint(err) {
 			return fmt.Errorf("%w: record already exists", ErrConflict)
@@ -151,7 +144,10 @@ func (s *SQLiteStore) Update(ctx context.Context, rec *vault.EncryptedRecord) er
 		return err
 	}
 	if n == 0 {
-		return ErrNotFound
+		if _, err := s.GetByID(ctx, rec.ID); err != nil {
+			return err
+		}
+		return ErrVersionConflict
 	}
 	return nil
 }

@@ -79,6 +79,9 @@ type TokenPayload struct {
 
 // SecretItem is the plaintext in-memory representation of a vault entry on the client.
 type SecretItem struct {
+	// Version is the authenticated source revision used for optimistic updates.
+	// It is reconstructed from the envelope rather than serialized in plaintext.
+	Version    int           `json:"-"`
 	ID         string        `json:"id"`
 	Type       SecretType    `json:"type"`
 	Identifier string        `json:"identifier"`
@@ -246,6 +249,7 @@ func Unseal(masterKey []byte, rec *EncryptedRecord) (*SecretItem, error) {
 	if err := json.Unmarshal(plaintext, &item); err != nil {
 		return nil, fmt.Errorf("unmarshal decrypted item: %w", err)
 	}
+	item.Version = rec.Version
 
 	return &item, nil
 }

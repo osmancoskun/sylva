@@ -113,7 +113,8 @@ type StatusResponse struct {
 
 // Stable error strings returned in ErrorBody.Error.
 const (
-	ErrorRecordExists = "record already exists"
+	ErrorRecordExists          = "record already exists"
+	ErrorRecordVersionConflict = "record changed; fetch it again before updating"
 )
 
 // ErrorBody is the standard HTTP error payload.

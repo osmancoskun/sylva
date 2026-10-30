@@ -55,6 +55,10 @@ func (s *Server) handleUpdateRecord(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.store.Update(r.Context(), &rec); err != nil {
+		if errors.Is(err, storage.ErrVersionConflict) {
+			writeJSON(w, http.StatusConflict, api.ErrorBody{Error: api.ErrorRecordVersionConflict})
+			return
+		}
 		if errors.Is(err, storage.ErrNotFound) {
 			writeStorageError(w, err)
 			return

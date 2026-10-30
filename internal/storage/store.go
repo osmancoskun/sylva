@@ -5,6 +5,7 @@ package storage
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/osman/sylva/internal/vault"
 )
@@ -22,6 +23,9 @@ var (
 
 	// ErrConflict indicates a uniqueness or salt-mismatch conflict.
 	ErrConflict = errors.New("storage: conflict")
+
+	// ErrVersionConflict rejects a write based on an outdated record version.
+	ErrVersionConflict = fmt.Errorf("%w: record changed; fetch it again before updating", ErrConflict)
 )
 
 // Store is the persistence contract used by both sylvad and the client cache.

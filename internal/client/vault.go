@@ -484,13 +484,17 @@ func (v *Vault) DeleteSecret(ctx context.Context, secretType vault.SecretType, i
 	return nil
 }
 
-// UpdateSecret replaces the stored secret with the same type and identifier.
+// UpdateSecret writes a previously read item only if its source version is
+// still current. It never retries a stale payload against a newer revision.
 func (v *Vault) UpdateSecret(ctx context.Context, item *vault.SecretItem) error {
 	if err := v.requireUnlocked(); err != nil {
 		return err
 	}
 	if item == nil {
 		return errors.New("secret item is required")
+	}
+	if item.ID == "" || item.Version <= 0 {
+		return errors.New("read the secret before updating it; its ID and version are required")
 	}
 	if item.Type == vault.SecretTypeLogin {
 		norm, err := tree.NormalizeDomain(item.Identifier)
@@ -502,28 +506,18 @@ func (v *Vault) UpdateSecret(ctx context.Context, item *vault.SecretItem) error 
 			item.Login.Domain = norm
 		}
 	}
-	existing, err := v.getByIdentifier(ctx, item.Type, item.Identifier)
-	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
-			return fmt.Errorf("%w: no %s secret named %s", storage.ErrNotFound, secretLabel(item.Type), item.Identifier)
-		}
-		return err
-	}
-	item.ID = existing.ID
-	if unsealed, unsealErr := vault.Unseal(v.masterKey, existing); unsealErr == nil {
-		item.CreatedAt = unsealed.CreatedAt
-	}
-	sealed, err := vault.Seal(v.masterKey, item, existing.Version+1)
+	sealed, err := vault.Seal(v.masterKey, item, item.Version+1)
 	if err != nil {
 		return err
 	}
 	if _, err := v.remote.UpdateRecord(ctx, sealed); err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
-			v.cacheForget(ctx, existing.BlindIndex)
+		if errors.Is(err, storage.ErrNotFound) || errors.Is(err, storage.ErrVersionConflict) {
+			v.cacheForget(ctx, sealed.BlindIndex)
 		}
 		return err
 	}
 	v.cacheReplace(ctx, sealed)
+	item.Version = sealed.Version
 	return nil
 }
 
@@ -594,6 +588,7 @@ func (v *Vault) createRecord(ctx context.Context, item *vault.SecretItem) error 
 		}
 		return err
 	}
+	item.Version = sealed.Version
 	return nil
 }
 

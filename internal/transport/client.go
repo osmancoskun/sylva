@@ -34,6 +34,10 @@ func (e *HTTPError) Unwrap() error {
 	}
 	switch e.Status {
 	case http.StatusConflict:
+		var body api.ErrorBody
+		if json.Unmarshal([]byte(e.Body), &body) == nil && body.Error == api.ErrorRecordVersionConflict {
+			return storage.ErrVersionConflict
+		}
 		return storage.ErrConflict
 	case http.StatusNotFound:
 		return storage.ErrNotFound
