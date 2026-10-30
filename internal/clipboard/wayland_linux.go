@@ -2,12 +2,14 @@ package clipboard
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
 	"sync"
 	"syscall"
+	"time"
 )
 
 const (
@@ -74,14 +76,16 @@ type waylandHolder struct {
 }
 
 func (h *waylandHolder) Close() error {
-	var err error
+	var notifyErr error
 	h.once.Do(func() {
 		close(h.done)
-		_ = h.w.send(h.device, 0, wlNewID(0))
-		_ = h.w.send(h.source, 1, nil)
-		err = h.w.Close()
+		if err := h.w.c.SetWriteDeadline(time.Now().Add(time.Second)); err != nil {
+			notifyErr = clipboardCloseError(err)
+			return
+		}
+		notifyErr = errors.Join(h.w.send(h.device, 0, wlNewID(0)), h.w.send(h.source, 1, nil))
 	})
-	return err
+	return errors.Join(notifyErr, h.w.Close())
 }
 
 func (h *waylandHolder) serve() {
@@ -296,11 +300,12 @@ func (w *wlConn) fill() error {
 }
 
 func (w *wlConn) Close() error {
+	var closeErr error
 	for _, fd := range w.fds {
-		_ = syscall.Close(fd)
+		closeErr = errors.Join(closeErr, syscall.Close(fd))
 	}
 	w.fds = nil
-	return w.c.Close()
+	return errors.Join(closeErr, clipboardCloseError(w.c.Close()))
 }
 
 func waylandSocket() (string, error) {

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"errors"
 	"fmt"
 	"syscall"
 	"unsafe"
@@ -74,14 +75,26 @@ func (k osKeyring) Get() (string, error) {
 }
 
 func (k osKeyring) Delete() error {
-	if err := ensureUserKeyring(); err != nil {
+	return deleteUserKey(k.description(), ensureUserKeyring, requestUserKey, func(serial int32) error {
+		_, err := keyctl(keyctlUnlink, uintptr(serial), uintptr(keySpecUserKeyring), 0, 0)
+		return err
+	})
+}
+
+func deleteUserKey(description string, ensure func() error, lookup func(string) (int32, error), unlink func(int32) error) error {
+	if err := ensure(); err != nil {
+		return fmt.Errorf("access kernel keyring for deletion: %w", err)
+	}
+	serial, err := lookup(description)
+	if errors.Is(err, syscall.ENOKEY) {
 		return nil
 	}
-	serial, err := requestUserKey(k.description())
 	if err != nil {
-		return nil
+		return fmt.Errorf("find kernel keyring entry for deletion: %w", err)
 	}
-	_, _ = keyctl(keyctlUnlink, uintptr(serial), uintptr(keySpecUserKeyring), 0, 0)
+	if err := unlink(serial); err != nil {
+		return fmt.Errorf("delete kernel keyring entry: %w", err)
+	}
 	return nil
 }
 

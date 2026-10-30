@@ -33,7 +33,7 @@ func DialWithLimit(socketPath string, timeout time.Duration, maxBytes int64) (*C
 	}
 	conn, err := net.DialTimeout("unix", socketPath, timeout)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
+		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	_ = conn.Close()
 	return &Client{socketPath: socketPath, timeout: timeout, maxRequestBytes: maxBytes}, nil
@@ -42,10 +42,7 @@ func DialWithLimit(socketPath string, timeout time.Duration, maxBytes int64) (*C
 // Status reports whether the agent currently holds a master key.
 func (c *Client) Status() (unlocked bool, err error) {
 	resp, err := c.roundTrip(api.AgentRequest{Op: api.AgentOpStatus})
-	if err != nil {
-		return false, err
-	}
-	return resp.Unlocked, nil
+	return resp.Unlocked, err
 }
 
 // Unlock stores the derived master key in the agent process.
@@ -92,7 +89,7 @@ func (c *Client) ScheduleClear(secret string) error {
 func (c *Client) roundTrip(req api.AgentRequest) (api.AgentResponse, error) {
 	conn, err := net.DialTimeout("unix", c.socketPath, c.timeout)
 	if err != nil {
-		return api.AgentResponse{}, fmt.Errorf("%w: %v", ErrUnavailable, err)
+		return api.AgentResponse{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	defer conn.Close()
 
@@ -106,6 +103,11 @@ func (c *Client) roundTrip(req api.AgentRequest) (api.AgentResponse, error) {
 	if err := readFrame(conn, c.maxRequestBytes, &resp); err != nil {
 		crypto.ZeroBytes(resp.Key)
 		return api.AgentResponse{}, fmt.Errorf("read agent response: %w", err)
+	}
+	if resp.CleanupError != "" {
+		crypto.ZeroBytes(resp.Key)
+		resp.Key = nil
+		return resp, fmt.Errorf("%w: %s; run sylva lock to retry cleanup", ErrCleanupIncomplete, resp.CleanupError)
 	}
 	if !resp.OK {
 		if resp.Error == ErrLocked.Error() {

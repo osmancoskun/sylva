@@ -36,15 +36,17 @@ type Manager struct {
 	backend Backend
 	after   time.Duration
 
-	mu        sync.Mutex
-	gen       uint64
-	done      chan struct{}
-	stop      chan struct{}
-	cleared   func()
-	closed    bool
-	workers   sync.WaitGroup
-	closeOnce sync.Once
-	closeErr  error
+	mu          sync.Mutex
+	gen         uint64
+	done        chan struct{}
+	stop        chan struct{}
+	cleared     func()
+	clearFailed func(error)
+	clearErr    error
+	closed      bool
+	workers     sync.WaitGroup
+	closeOnce   sync.Once
+	closeErr    error
 }
 
 // NewManager constructs a clipboard manager for the configured backend.
@@ -96,17 +98,18 @@ func (m *Manager) Copy(text string) error {
 
 // ScheduleClear waits the configured duration and clears the clipboard if it
 // still holds the original secret. It does not write.
-func (m *Manager) ScheduleClear(text string) {
-	m.schedule(text)
+func (m *Manager) ScheduleClear(text string) error {
+	return m.schedule(text)
 }
 
-func (m *Manager) schedule(text string) {
+func (m *Manager) schedule(text string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed {
-		return
+		return ErrClosed
 	}
 	m.scheduleLocked(text)
+	return nil
 }
 
 func (m *Manager) scheduleLocked(text string) {
@@ -147,11 +150,36 @@ func (m *Manager) clearIfUnchanged(gen uint64, original string) {
 		m.mu.Unlock()
 		return
 	}
-	_ = m.backend.Clear()
+	clearErr := m.backend.Clear()
+	if err != nil {
+		err = fmt.Errorf("read clipboard before clearing: %w", err)
+	}
+	m.clearErr = errors.Join(err, clearErr)
+	failure := m.clearFailed
+	result := m.clearErr
 	m.mu.Unlock()
-	if fn != nil {
+	if result != nil {
+		if failure != nil {
+			failure(result)
+		}
+	} else if fn != nil {
 		fn()
 	}
+}
+
+// NotifyClearFailed observes automatic clear failures outside the manager lock.
+// Like NotifyCleared, callbacks must not call Close or Wait on this manager.
+func (m *Manager) NotifyClearFailed(fn func(error)) {
+	m.mu.Lock()
+	m.clearFailed = fn
+	m.mu.Unlock()
+}
+
+// ClearError preserves a failed cleanup until a subsequent clear succeeds.
+func (m *Manager) ClearError() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.clearErr
 }
 
 // NotifyCleared registers a callback invoked after an automatic clipboard clear.
@@ -184,7 +212,8 @@ func (m *Manager) Clear() error {
 		close(m.stop)
 		m.stop = nil
 	}
-	return m.backend.Clear()
+	m.clearErr = m.backend.Clear()
+	return m.clearErr
 }
 
 // Wait blocks until the latest scheduled clear has finished.
@@ -215,7 +244,10 @@ func (m *Manager) Close() error {
 		}
 		m.mu.Unlock()
 		m.workers.Wait()
-		m.closeErr = m.backend.Close()
+		m.mu.Lock()
+		clearErr := m.clearErr
+		m.mu.Unlock()
+		m.closeErr = errors.Join(clearErr, m.backend.Close())
 	})
 	return m.closeErr
 }

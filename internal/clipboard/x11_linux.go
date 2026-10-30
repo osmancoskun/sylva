@@ -83,12 +83,10 @@ type x11Holder struct {
 }
 
 func (h *x11Holder) Close() error {
-	var err error
 	h.once.Do(func() {
 		close(h.done)
-		err = h.xc.Close()
 	})
-	return err
+	return clipboardCloseError(h.xc.Close())
 }
 
 func (h *x11Holder) serve() {

@@ -110,6 +110,30 @@ On shutdown the agent closes active connections, waits for request and idle
 workers, wipes the key/clipboard, and joins pending clipboard clear callbacks
 before releasing its lock. Clipboard managers reject copies after closing.
 
+### Cleanup failures and retrying lock
+
+`sylva lock` attempts both keyring deletion and the agent's in-memory key wipe,
+even if one fails. Only successful cleanup prints `Session locked`. A missing
+agent or keyring entry is harmless; permission, connection, and deletion
+failures are returned as errors. The agent always zeroes its session key on a
+manual or idle lock, even when clipboard/keyring cleanup fails.
+
+The local agent protocol reports `unlocked` and `cleanup_error` separately.
+An expired key can be gone while a keyring entry or clipboard still needs
+cleanup. Automatic clipboard failures emit an error event, never a successful
+`clipboard cleared` event. Until a successful `sylva lock` retry, the CLI refuses
+normal key reuse, unlock, and clipboard commands rather than silently falling
+back to the stored/configured passphrase. An automatic clipboard failure by
+itself does not immediately erase an active session key; manual/idle locking
+still does, and key access remains blocked while cleanup is pending.
+
+Resolve the reported backend/permission issue and run `sylva lock` again. A
+successful retry clears the pending error. Agent shutdown also returns cleanup
+errors. Upgrade/restart existing agent processes with the CLI so both sides
+understand the cleanup status. This is process-local status, not a persistent
+audit trail across agent crashes; if an agent exits with a cleanup error, fix
+the underlying issue and retry cleanup explicitly.
+
 ## Secrets
 
 ```bash

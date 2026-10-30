@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"sync"
@@ -24,6 +25,8 @@ var (
 
 	// ErrLocked indicates the agent is running but has no master key.
 	ErrLocked = errors.New("session agent is locked")
+
+	ErrCleanupIncomplete = errors.New("session cleanup incomplete")
 
 	// ErrAlreadyRunning leaves the active agent and its unlocked key untouched.
 	ErrAlreadyRunning = errors.New("session agent is already running")
@@ -44,6 +47,8 @@ type Server struct {
 	onLock          func() error
 	requestTimeout  time.Duration
 	maxRequestBytes int64
+	clipboardErr    error
+	keyringErr      error
 }
 
 const (
@@ -83,11 +88,20 @@ func normalizeOptions(o Options) (Options, error) {
 	return o, nil
 }
 
-// Serve listens on the configured unix socket until ctx is cancelled.
+// Serve listens until ctx is cancelled and takes ownership of clip on every
+// return path. Shutdown errors include failures clearing keys or clipboard.
 func Serve(ctx context.Context, socketPath string, clip *clipboard.Manager, log *slog.Logger, options ...Options) (retErr error) {
 	if log == nil {
 		log = slog.Default()
 	}
+	closeEarly := true
+	defer func() {
+		if closeEarly && clip != nil {
+			if err := clip.Close(); err != nil {
+				retErr = errors.Join(retErr, fmt.Errorf("%w: close clipboard: %w", ErrCleanupIncomplete, err))
+			}
+		}
+	}()
 	var opt Options
 	if len(options) > 0 {
 		opt = options[0]
@@ -101,11 +115,20 @@ func Serve(ctx context.Context, socketPath string, clip *clipboard.Manager, log 
 		return err
 	}
 	defer func() { retErr = errors.Join(retErr, release()) }()
+	closeEarly = false
 	if clip != nil {
-		defer clip.Close()
+		defer func() {
+			if err := clip.Close(); err != nil {
+				retErr = errors.Join(retErr, fmt.Errorf("%w: close clipboard: %w", ErrCleanupIncomplete, err))
+			}
+		}()
 	}
 	srv := &Server{socketPath: socketPath, clip: clip, log: log, idleTimeout: opt.IdleTimeout, onLock: opt.OnLock, requestTimeout: opt.RequestTimeout, maxRequestBytes: opt.MaxRequestBytes}
-	defer srv.wipe()
+	defer func() {
+		if err := srv.wipe(); err != nil {
+			retErr = errors.Join(retErr, fmt.Errorf("%w: %w", ErrCleanupIncomplete, err))
+		}
+	}()
 	stopIdle := make(chan struct{})
 	idleDone := make(chan struct{})
 	go func() {
@@ -129,6 +152,7 @@ func Serve(ctx context.Context, socketPath string, clip *clipboard.Manager, log 
 		clip.NotifyCleared(func() {
 			log.Info("clipboard cleared", srv.copiedTarget()...)
 		})
+		clip.NotifyClearFailed(func(err error) { log.Error("automatic clipboard clear failed", slog.Any("error", err)) })
 	}
 	log.Info("session agent listening", slog.String("socket", socketPath))
 
@@ -191,13 +215,6 @@ func (s *Server) copiedTarget() []any {
 	return clipboardTargetAttrs(s.copyType, s.copyIdentifier)
 }
 
-func (s *Server) setCopiedTarget(secretType, identifier string) {
-	s.mu.Lock()
-	s.copyType = secretType
-	s.copyIdentifier = identifier
-	s.mu.Unlock()
-}
-
 func clipboardTargetAttrs(secretType, identifier string) []any {
 	var attrs []any
 	if secretType != "" {
@@ -233,6 +250,9 @@ func (s *Server) handle(conn net.Conn) {
 		s.mu.Lock()
 		s.expireLocked()
 		resp = api.AgentResponse{OK: true, Unlocked: len(s.key) > 0}
+		if err := s.cleanupErrorLocked(); err != nil {
+			resp.CleanupError = err.Error()
+		}
 		s.mu.Unlock()
 	case api.AgentOpUnlock:
 		if len(req.Key) != 32 {
@@ -240,6 +260,12 @@ func (s *Server) handle(conn net.Conn) {
 			break
 		}
 		s.mu.Lock()
+		s.expireLocked()
+		if err := s.cleanupErrorLocked(); err != nil {
+			resp = cleanupResponse(err)
+			s.mu.Unlock()
+			break
+		}
 		crypto.ZeroBytes(s.key)
 		s.key = append([]byte(nil), req.Key...)
 		s.expires = time.Now().Add(s.idleTimeout)
@@ -247,12 +273,21 @@ func (s *Server) handle(conn net.Conn) {
 		s.log.Info("session unlocked")
 		resp = api.AgentResponse{OK: true, Unlocked: true}
 	case api.AgentOpLock:
-		s.wipe()
-		s.log.Info("session locked")
-		resp = api.AgentResponse{OK: true, Unlocked: false}
+		if err := s.wipe(); err != nil {
+			resp = cleanupResponse(err)
+			s.log.Error("session key cleared; cleanup incomplete", slog.Any("error", err))
+		} else {
+			s.log.Info("session locked")
+			resp = api.AgentResponse{OK: true, Unlocked: false}
+		}
 	case api.AgentOpMasterKey:
 		s.mu.Lock()
 		s.expireLocked()
+		if err := s.cleanupErrorLocked(); err != nil {
+			resp = cleanupResponse(err)
+			s.mu.Unlock()
+			break
+		}
 		if len(s.key) == 0 {
 			s.mu.Unlock()
 			resp = api.AgentResponse{Error: ErrLocked.Error()}
@@ -261,25 +296,33 @@ func (s *Server) handle(conn net.Conn) {
 		resp = api.AgentResponse{OK: true, Unlocked: true, Key: append([]byte(nil), s.key...)}
 		s.expires = time.Now().Add(s.idleTimeout)
 		s.mu.Unlock()
-	case api.AgentOpCopy:
-		if s.clip == nil {
+	case api.AgentOpCopy, api.AgentOpScheduleClear:
+		s.mu.Lock()
+		s.expireLocked()
+		if err := s.cleanupErrorLocked(); err != nil {
+			resp = cleanupResponse(err)
+		} else if s.clip == nil {
 			resp = api.AgentResponse{Error: "clipboard manager is not configured"}
-			break
+		} else {
+			var err error
+			if req.Op == api.AgentOpCopy {
+				s.copyType = req.Type
+				s.copyIdentifier = req.Identifier
+				err = s.clip.Copy(req.Secret)
+			} else {
+				err = s.clip.ScheduleClear(req.Secret)
+			}
+			if err != nil {
+				resp = api.AgentResponse{Error: err.Error()}
+			} else {
+				resp = api.AgentResponse{OK: true}
+			}
 		}
-		s.setCopiedTarget(req.Type, req.Identifier)
-		if err := s.clip.Copy(req.Secret); err != nil {
-			resp = api.AgentResponse{Error: err.Error()}
-			break
+		s.mu.Unlock()
+		if req.Op == api.AgentOpCopy && resp.OK {
+			s.log.Info("secret copied to clipboard", clipboardTargetAttrs(req.Type, req.Identifier)...)
 		}
-		s.log.Info("secret copied to clipboard", clipboardTargetAttrs(req.Type, req.Identifier)...)
-		resp = api.AgentResponse{OK: true}
-	case api.AgentOpScheduleClear:
-		if s.clip == nil {
-			resp = api.AgentResponse{Error: "clipboard manager is not configured"}
-			break
-		}
-		s.clip.ScheduleClear(req.Secret)
-		resp = api.AgentResponse{OK: true}
+
 	default:
 		resp = api.AgentResponse{Error: "unknown agent operation"}
 	}
@@ -287,36 +330,55 @@ func (s *Server) handle(conn net.Conn) {
 	_ = json.NewEncoder(conn).Encode(resp)
 }
 
-func (s *Server) wipe() {
+func cleanupResponse(err error) api.AgentResponse {
+	return api.AgentResponse{Error: err.Error(), CleanupError: err.Error()}
+}
+
+func (s *Server) cleanupErrorLocked() error {
+	clipErr := s.clipboardErr
+	if s.clip != nil {
+		if err := s.clip.ClearError(); err != nil {
+			clipErr = err
+		}
+	}
+	if clipErr != nil {
+		clipErr = fmt.Errorf("clear clipboard: %w", clipErr)
+	}
+	var keyringErr error
+	if s.keyringErr != nil {
+		keyringErr = fmt.Errorf("clear keyring: %w", s.keyringErr)
+	}
+	return errors.Join(clipErr, keyringErr)
+}
+
+func (s *Server) wipe() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.wipeLocked()
+}
+
+func (s *Server) wipeLocked() error {
 	crypto.ZeroBytes(s.key)
 	s.key = nil
 	s.expires = time.Time{}
+	s.clipboardErr = nil
+	s.keyringErr = nil
 	if s.clip != nil {
-		_ = s.clip.Clear()
+		s.clipboardErr = s.clip.Clear()
 	}
 	if s.onLock != nil {
-		if err := s.onLock(); err != nil {
-			s.log.Error("clear keyring on lock", "error", err)
-		}
+		s.keyringErr = s.onLock()
 	}
+	return s.cleanupErrorLocked()
 }
 
 // Caller holds mu. Status probes do not extend the session deadline.
 func (s *Server) expireLocked() {
 	if len(s.key) > 0 && !time.Now().Before(s.expires) {
-		crypto.ZeroBytes(s.key)
-		s.key = nil
-		s.expires = time.Time{}
-		if s.clip != nil {
-			_ = s.clip.Clear()
+		if err := s.wipeLocked(); err != nil {
+			s.log.Error("session key expired; cleanup incomplete", slog.Any("error", err))
+		} else {
+			s.log.Info("session automatically locked")
 		}
-		if s.onLock != nil {
-			if err := s.onLock(); err != nil {
-				s.log.Error("clear keyring on auto-lock", "error", err)
-			}
-		}
-		s.log.Info("session automatically locked")
 	}
 }

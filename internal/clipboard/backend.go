@@ -1,7 +1,9 @@
 package clipboard
 
 import (
+	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"sync"
@@ -37,7 +39,7 @@ func (m *memoryBackend) Clear() error {
 	return nil
 }
 
-func (m *memoryBackend) Close() error { return nil }
+func (m *memoryBackend) Close() error { return m.Clear() }
 
 type fileBackend struct {
 	path string
@@ -84,10 +86,19 @@ type clipboardHolder interface {
 	Close() error
 }
 
+func clipboardCloseError(err error) error {
+	if errors.Is(err, net.ErrClosed) {
+		return nil
+	}
+	return err
+}
+
 func (o *osBackend) Write(text string) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.closeLocked()
+	if err := o.closeLocked(); err != nil {
+		return err
+	}
 	hold, err := startOSClipboard(o.kind, text, func() { o.owned.Store(false) })
 	if err != nil {
 		return err
@@ -110,7 +121,9 @@ func (o *osBackend) Read() (string, error) {
 func (o *osBackend) Clear() error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.closeLocked()
+	if err := o.closeLocked(); err != nil {
+		return err
+	}
 	o.text = ""
 	o.owned.Store(false)
 	return nil
@@ -120,9 +133,12 @@ func (o *osBackend) Close() error {
 	return o.Clear()
 }
 
-func (o *osBackend) closeLocked() {
+func (o *osBackend) closeLocked() error {
 	if o.hold != nil {
-		_ = o.hold.Close()
+		if err := o.hold.Close(); err != nil {
+			return err
+		}
 		o.hold = nil
 	}
+	return nil
 }

@@ -25,6 +25,9 @@ type AgentResponse struct {
 	Error    string `json:"error,omitempty"`
 	Unlocked bool   `json:"unlocked,omitempty"`
 	Key      []byte `json:"key,omitempty"`
+	// CleanupError is independent of Unlocked: a missing in-memory key does not
+	// imply that the clipboard and persistent keyring were successfully cleared.
+	CleanupError string `json:"cleanup_error,omitempty"`
 }
 
 // AgentOps lists every supported session-agent operation.

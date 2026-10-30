@@ -21,4 +21,6 @@ func (osKeyring) Get() (string, error) {
 	return "", errKeyringEmpty
 }
 
-func (osKeyring) Delete() error { return nil }
+func (osKeyring) Delete() error {
+	return fmt.Errorf("os keyring uses the Linux kernel keyring and is not supported on %s", runtime.GOOS)
+}

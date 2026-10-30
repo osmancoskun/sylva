@@ -29,6 +29,10 @@ func openUnlocked(cfg config.ClientConfig) (*sylva.Vault, error) {
 	if cfg.AgentEnabled {
 		if ac, err := agent.DialWithLimit(cfg.AgentSocketPath, cfg.Timeout, cfg.AgentMaxRequestBytes); err == nil {
 			key, keyErr := ac.MasterKey()
+			if errors.Is(keyErr, agent.ErrCleanupIncomplete) {
+				_ = v.Close()
+				return nil, keyErr
+			}
 			if keyErr == nil {
 				ctx, cancel := context.WithTimeout(context.Background(), cfg.Timeout)
 				err := v.UnlockWithKey(ctx, key)
@@ -60,6 +64,15 @@ func openUnlocked(cfg config.ClientConfig) (*sylva.Vault, error) {
 }
 
 func resolvePassphrase(cfg config.ClientConfig, v *sylva.Vault) (string, error) {
+	if cfg.AgentEnabled {
+		if ac, err := agent.DialWithLimit(cfg.AgentSocketPath, cfg.Timeout, cfg.AgentMaxRequestBytes); err == nil {
+			if _, err := ac.Status(); err != nil {
+				return "", err
+			}
+		} else if !agentAbsent(err) {
+			return "", err
+		}
+	}
 	if strings.TrimSpace(cfg.MasterPassphrase) != "" {
 		return cfg.MasterPassphrase, nil
 	}
@@ -145,22 +158,48 @@ func runUnlock(cfg config.ClientConfig) error {
 }
 
 func runLock(cfg config.ClientConfig) error {
+	var kr agent.Keyring
 	if cfg.KeyringEnabled {
-		kr := agent.NewKeyring(true, cfg.KeyringService, cfg.KeyringUser)
-		if err := kr.Delete(); err != nil {
-			return err
+		kr = agent.NewKeyring(true, cfg.KeyringService, cfg.KeyringUser)
+	}
+	var lockAgent func() error
+	if cfg.AgentEnabled {
+		lockAgent = func() error {
+			ac, err := agent.DialWithLimit(cfg.AgentSocketPath, cfg.Timeout, cfg.AgentMaxRequestBytes)
+			if err != nil {
+				if agentAbsent(err) {
+					return nil
+				}
+				return fmt.Errorf("contact session agent: %w", err)
+			}
+			return ac.Lock()
 		}
 	}
-	if cfg.AgentEnabled {
-		ac, err := agent.DialWithLimit(cfg.AgentSocketPath, cfg.Timeout, cfg.AgentMaxRequestBytes)
-		if err == nil {
-			if err := ac.Lock(); err != nil {
-				return err
-			}
-		}
+	if err := lockSession(kr, lockAgent); err != nil {
+		return fmt.Errorf("session cleanup incomplete: %w", err)
 	}
 	fmt.Println("Session locked")
 	return nil
+}
+
+func agentAbsent(err error) bool {
+	return errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ECONNREFUSED)
+}
+
+// A failed persistent-key deletion must never skip the in-memory key wipe.
+func lockSession(kr agent.Keyring, lockAgent func() error) error {
+	var keyringErr, agentErr error
+	if kr != nil {
+		if err := kr.Delete(); err != nil {
+			keyringErr = fmt.Errorf("clear keyring: %w", err)
+		}
+	}
+	if lockAgent != nil {
+		if err := lockAgent(); err != nil {
+			agentErr = fmt.Errorf("lock agent: %w", err)
+		}
+	}
+	return errors.Join(keyringErr, agentErr)
 }
 
 func runAgent(cfg config.ClientConfig) error {
@@ -174,8 +213,6 @@ func runAgent(cfg config.ClientConfig) error {
 	if err != nil {
 		return err
 	}
-
-	defer clip.Close()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
