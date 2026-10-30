@@ -475,11 +475,12 @@ func (v *Vault) DeleteSecret(ctx context.Context, secretType vault.SecretType, i
 		return err
 	}
 	if err := v.remote.DeleteRecord(ctx, rec.ID); err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			v.cacheForget(ctx, rec.BlindIndex)
+		}
 		return err
 	}
-	if v.cache != nil {
-		_ = v.cache.Delete(ctx, rec.ID)
-	}
+	v.cacheForget(ctx, rec.BlindIndex)
 	return nil
 }
 
@@ -517,6 +518,9 @@ func (v *Vault) UpdateSecret(ctx context.Context, item *vault.SecretItem) error 
 		return err
 	}
 	if _, err := v.remote.UpdateRecord(ctx, sealed); err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			v.cacheForget(ctx, existing.BlindIndex)
+		}
 		return err
 	}
 	v.cacheReplace(ctx, sealed)
@@ -615,9 +619,7 @@ func (v *Vault) putRecord(ctx context.Context, rec *vault.EncryptedRecord) error
 	if _, err := v.remote.PutRecord(ctx, rec); err != nil {
 		return err
 	}
-	if v.cache != nil {
-		_ = v.cache.Put(ctx, rec)
-	}
+	v.cacheReplace(ctx, rec)
 	return nil
 }
 
@@ -625,8 +627,8 @@ func (v *Vault) cacheReplace(ctx context.Context, rec *vault.EncryptedRecord) {
 	if v.cache == nil {
 		return
 	}
-	if err := v.cache.Update(ctx, rec); err != nil {
-		_ = v.cache.Put(ctx, rec)
+	if err := v.cache.Upsert(ctx, rec); err != nil {
+		v.disableCache()
 	}
 }
 
@@ -634,13 +636,13 @@ func (v *Vault) listRecords(ctx context.Context, secretType vault.SecretType) ([
 	recs, err := v.remote.ListRecords(ctx, secretType)
 	if err == nil {
 		if v.cache != nil {
-			for _, rec := range recs {
-				v.cacheReplace(ctx, rec)
+			if err := v.cache.ReplaceRecords(ctx, secretType, recs); err != nil {
+				v.disableCache()
 			}
 		}
 		return recs, nil
 	}
-	if v.cache == nil {
+	if v.cache == nil || !canReadCache(ctx, err) {
 		return nil, err
 	}
 	return v.cache.List(ctx, secretType)
@@ -656,7 +658,11 @@ func (v *Vault) getByIdentifier(ctx context.Context, secretType vault.SecretType
 		v.cacheReplace(ctx, rec)
 		return rec, nil
 	}
-	if v.cache == nil {
+	if errors.Is(err, storage.ErrNotFound) {
+		v.cacheForget(ctx, idx)
+		return nil, err
+	}
+	if v.cache == nil || !canReadCache(ctx, err) {
 		return nil, err
 	}
 	return v.cache.GetByBlindIndex(ctx, idx)

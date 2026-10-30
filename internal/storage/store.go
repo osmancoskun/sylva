@@ -36,4 +36,8 @@ type Store interface {
 	PutMetadata(ctx context.Context, key string, value []byte) error
 	CreateMetadata(ctx context.Context, key string, value []byte) error // insert-only, atomic
 	GetMetadata(ctx context.Context, key string) ([]byte, error)
+	// Cache operations replace authoritative records without insert-only conflicts.
+	Upsert(ctx context.Context, rec *vault.EncryptedRecord) error
+	ReplaceRecords(ctx context.Context, secretType vault.SecretType, records []*vault.EncryptedRecord) error
+	DeleteByBlindIndex(ctx context.Context, blindIndex string) error
 }

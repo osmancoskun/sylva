@@ -152,6 +152,9 @@ func (c *Client) ListRecords(ctx context.Context, secretType vault.SecretType) (
 	if err := c.doJSON(ctx, http.MethodGet, u, nil, http.StatusOK, &out); err != nil {
 		return nil, err
 	}
+	if out.Records == nil {
+		return nil, fmt.Errorf("invalid records response: records must be an array")
+	}
 	return out.Records, nil
 }
 
@@ -218,8 +221,11 @@ func (c *Client) doJSON(ctx context.Context, method, reqURL string, in any, want
 	if wantStatus == 0 && resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		return explainStatus(&HTTPError{Status: resp.StatusCode, Body: strings.TrimSpace(string(body))})
 	}
-	if out == nil || resp.StatusCode == http.StatusNoContent || len(body) == 0 {
+	if out == nil || resp.StatusCode == http.StatusNoContent {
 		return nil
+	}
+	if len(body) == 0 {
+		return fmt.Errorf("decode response: empty JSON body")
 	}
 	if err := json.Unmarshal(body, out); err != nil {
 		return fmt.Errorf("decode response: %w", err)

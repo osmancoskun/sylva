@@ -28,6 +28,10 @@ Both commands take `-env PATH` (default `.env`). `sylvad -addr host:port` overri
 
 `ping` should report `Status: ok` and `mTLS: false`. Data file: `server_db_path` (default `.sylva/sylvad.db`). The CLI may also keep a ciphertext cache at `client_cache_path`.
 
+Successful server reads update the cache. A missing record response removes that identifier from the cache; a successful list replaces the cached snapshot for the requested type (or all types for an unfiltered list). This also handles records deleted or recreated on another device.
+
+An already unlocked client may read its last cached snapshot after a connection failure. HTTP errors, TLS verification errors, malformed responses, and canceled requests are returned without a cache fallback. Changes made elsewhere remain unknown until a successful server read; the cache is not a live synchronization service. Unlocking still requires the server as described below.
+
 ## Initialize the vault
 
 Once, against an empty server:
