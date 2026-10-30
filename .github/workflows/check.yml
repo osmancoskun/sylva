@@ -37,3 +37,14 @@ jobs:
         run: make fuzz FUZZTIME=5s
       - name: Build
         run: make build
+
+  docker-e2e:
+    name: Docker mTLS and recovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Test mTLS, passphrase rotation, backup and restore
+        run: make docker-e2e

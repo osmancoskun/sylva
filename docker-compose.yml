@@ -9,7 +9,7 @@ x-tls-config: &tls-config
 
 x-ca-cert: &ca-cert
   type: bind
-  source: ./.sylva/certs/ca.pem
+  source: ${SYLVA_CERT_DIR:-./.sylva/certs}/ca.pem
   target: /run/sylva/certs/ca.pem
   read_only: true
   bind:
@@ -38,14 +38,14 @@ services:
       - *tls-config
       - *ca-cert
       - type: bind
-        source: ./.sylva/certs/server.pem
+        source: ${SYLVA_CERT_DIR:-./.sylva/certs}/server.pem
         target: /run/sylva/certs/server.pem
         read_only: true
         bind:
           create_host_path: false
           selinux: z
       - type: bind
-        source: ./.sylva/certs/server.key
+        source: ${SYLVA_CERT_DIR:-./.sylva/certs}/server.key
         target: /run/sylva/certs/server.key
         read_only: true
         bind:
@@ -62,7 +62,7 @@ services:
       network: host
       target: sylva
     env_file:
-      - .env
+      - ${SYLVA_ENV_FILE:-.env}
     environment:
       SYLVA_HOST: sylvad
       SYLVA_CLIENT_CACHE_PATH: /tmp/sylva-cache.db
@@ -72,14 +72,14 @@ services:
       - *tls-config
       - *ca-cert
       - type: bind
-        source: ./.sylva/certs/client.pem
+        source: ${SYLVA_CERT_DIR:-./.sylva/certs}/client.pem
         target: /run/sylva/certs/client.pem
         read_only: true
         bind:
           create_host_path: false
           selinux: z
       - type: bind
-        source: ./.sylva/certs/client.key
+        source: ${SYLVA_CERT_DIR:-./.sylva/certs}/client.key
         target: /run/sylva/certs/client.key
         read_only: true
         bind:

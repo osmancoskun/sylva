@@ -12,7 +12,7 @@ FUZZTIME ?= 10s
 BENCHTIME ?= 2s
 PROFILE_DIR ?= .profiles
 
-.PHONY: all build build-cli build-daemon test vet check fuzz bench profile-memory clean docker-test docker-smoke docker-down
+.PHONY: all build build-cli build-daemon test vet check fuzz bench profile-memory clean docker-test docker-smoke docker-e2e docker-down
 
 all: build
 
@@ -73,6 +73,9 @@ docker-smoke:
 	$(DOCKER_COMPOSE) run --rm --no-deps sylva get github-token
 	$(DOCKER_COMPOSE) run --rm --no-deps sylva delete github-token --yes
 	$(DOCKER_COMPOSE) down --remove-orphans
+
+docker-e2e:
+	python3 scripts/docker_e2e.py
 
 docker-down:
 	$(DOCKER_COMPOSE) down --remove-orphans --volumes

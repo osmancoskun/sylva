@@ -227,6 +227,29 @@ decoded records, and cryptographic buffers before raising them.
 
 ## Tests
 
+`make docker-e2e` runs the same Docker integration test as the separate
+`Docker mTLS and recovery` CI job. It requires Docker with Compose v2+, OpenSSL,
+and Python 3 on Linux. No existing `.env`, certificates, or running daemon are
+needed. Each run generates a short-lived test CA and certificate pairs, builds
+the images, and starts two vaults on a separate bridge network with unique
+volumes. The source server publishes only a random loopback port.
+
+The test checks valid mTLS access, rejection of missing/untrusted client
+certificates before HTTP, CLI create/read/update/delete and domain inheritance,
+and exact decrypted values for password, domain, env, and SSH entries. It also
+changes the master passphrase through hidden terminal prompts and confirms
+the old passphrase stops working. Backup/restore checks include encrypted
+archives with mode `0600`, refusal to overwrite an existing backup or vault,
+wrong-passphrase/tampered-archive rejection, and recovery into a fresh vault.
+Recovery must preserve all values without changing the source vault.
+
+Temporary containers, images, volumes, network, certificates, and archive files
+are removed on success or failure (also on a handled interrupt). A forced kill
+or Docker daemon outage can prevent cleanup; leftover resources have the
+unique `sylva-e2e-...` Compose project prefix. The headless value checks use an
+explicit temporary file clipboard, never the desktop clipboard. CI does not
+upload generated keys, archives, or clipboard files.
+
 `make check` runs formatting, `go vet` (including missed context cancellation),
 nilness, Staticcheck, NilAway, HTTP response-body and SQL rows/statement closing
 checks, vulnerability scanning, and uncached tests. A failed analysis does not

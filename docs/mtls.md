@@ -133,6 +133,11 @@ docker compose run --rm sylva ping
 The build variables match the Makefile's classic-builder setup for this
 project's host-network module downloads.
 
+The certificate directory and CLI environment file can be overridden with
+`SYLVA_CERT_DIR` and `SYLVA_ENV_FILE`; their defaults remain `.sylva/certs` and
+`.env`. `make docker-e2e` uses temporary replacements for an isolated automated
+test, including certificate rejection, passphrase rotation, and backup/recovery.
+
 The published host port defaults to `127.0.0.1`. To intentionally publish to a
 LAN interface, set `SYLVA_PUBLISH_HOST` in `.env` to that interface's IP;
 `0.0.0.0` publishes on all IPv4 interfaces. mTLS remains required in either
