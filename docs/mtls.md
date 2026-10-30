@@ -30,7 +30,7 @@ openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -sha256 \
   -keyout ca.key -out ca.pem
 
 cat > server.ext <<'EOF'
-subjectAltName=DNS:localhost,IP:127.0.0.1
+subjectAltName=DNS:localhost,DNS:sylvad,IP:127.0.0.1
 keyUsage=digitalSignature
 extendedKeyUsage=serverAuth
 EOF
@@ -109,7 +109,35 @@ Use the same `SYLVA_PORT` as plaintext (default `8443`). mTLS is a mode on that 
 
 ## Docker
 
-Compose talks to the daemon as hostname `sylvad`. Add `DNS:sylvad` to the server SAN (and rebuild the cert) or the client name check fails even with a valid client certificate.
+Compose keeps its bridge network and requires mTLS for every connection,
+including container-to-container traffic. Before starting it, issue the five
+files above under `.sylva/certs/`: `ca.pem`, `server.pem`, `server.key`,
+`client.pem`, and `client.key`. The server SAN must contain `DNS:sylvad` (as in
+the example above) because that is the hostname used by the CLI container.
+Missing bind-mounted certificate files prevent container startup.
+
+The server receives only the CA certificate and its own server pair; the CLI
+receives only the CA certificate and its own client pair. The CA private key
+is never mounted. These files and `docker/mtls.conf` are mounted read-only;
+bind mounts use a shared SELinux label for hosts that enforce SELinux.
+Compose uses this dedicated config even if the host `.sylva/config` has mTLS
+disabled. The server service does not import the CLI's master passphrase from
+`.env` into its environment.
+
+```bash
+cp .env.example .env  # only when .env does not already exist
+DOCKER_BUILDKIT=0 COMPOSE_BAKE=false docker compose up -d --build sylvad
+docker compose run --rm sylva ping
+```
+
+The build variables match the Makefile's classic-builder setup for this
+project's host-network module downloads.
+
+The published host port defaults to `127.0.0.1`. To intentionally publish to a
+LAN interface, set `SYLVA_PUBLISH_HOST` in `.env` to that interface's IP;
+`0.0.0.0` publishes on all IPv4 interfaces. mTLS remains required in either
+case. A host-native CLI must enable mTLS separately and use a URL whose hostname
+or IP is included in the server SAN.
 
 ## Limits
 

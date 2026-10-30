@@ -1,3 +1,21 @@
+x-tls-config: &tls-config
+  type: bind
+  source: ./docker/mtls.conf
+  target: /etc/sylva/config
+  read_only: true
+  bind:
+    create_host_path: false
+    selinux: z
+
+x-ca-cert: &ca-cert
+  type: bind
+  source: ./.sylva/certs/ca.pem
+  target: /run/sylva/certs/ca.pem
+  read_only: true
+  bind:
+    create_host_path: false
+    selinux: z
+
 services:
   test:
     build:
@@ -10,15 +28,31 @@ services:
       context: .
       network: host
       target: sylvad
-    env_file:
-      - .env
     environment:
       SYLVA_HOST: 0.0.0.0
+      SYLVA_PORT: "${SYLVA_PORT:-8443}"
       SYLVA_SERVER_DB_PATH: /data/sylvad.db
+      SYLVA_LOCAL_CONFIG: /etc/sylva/config
     volumes:
       - sylvad-data:/data
+      - *tls-config
+      - *ca-cert
+      - type: bind
+        source: ./.sylva/certs/server.pem
+        target: /run/sylva/certs/server.pem
+        read_only: true
+        bind:
+          create_host_path: false
+          selinux: z
+      - type: bind
+        source: ./.sylva/certs/server.key
+        target: /run/sylva/certs/server.key
+        read_only: true
+        bind:
+          create_host_path: false
+          selinux: z
     ports:
-      - "${SYLVA_PORT}:${SYLVA_PORT}"
+      - "${SYLVA_PUBLISH_HOST:-127.0.0.1}:${SYLVA_PORT}:${SYLVA_PORT}"
     networks:
       - sylva-net
 
@@ -33,6 +67,24 @@ services:
       SYLVA_HOST: sylvad
       SYLVA_CLIENT_CACHE_PATH: /tmp/sylva-cache.db
       SYLVA_CLIPBOARD_BACKEND: memory
+      SYLVA_LOCAL_CONFIG: /etc/sylva/config
+    volumes:
+      - *tls-config
+      - *ca-cert
+      - type: bind
+        source: ./.sylva/certs/client.pem
+        target: /run/sylva/certs/client.pem
+        read_only: true
+        bind:
+          create_host_path: false
+          selinux: z
+      - type: bind
+        source: ./.sylva/certs/client.key
+        target: /run/sylva/certs/client.key
+        read_only: true
+        bind:
+          create_host_path: false
+          selinux: z
     depends_on:
       - sylvad
     networks:

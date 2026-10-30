@@ -8,6 +8,16 @@ This is how you expose the daemon past localhost without opening a LAN port. mTL
 
 When Tailscale is on, `sylvad` listens on the tailnet (port `SYLVA_PORT`) **and** on `127.0.0.1` so the CLI on the same machine works. It does not bind the LAN.
 
+Only the embedded tsnet listener gets this remote-HTTP exception. Binding a
+regular TCP listener to a host Tailscale IP still requires mTLS. Tailscale
+encrypts and authenticates the network connection, while your tailnet access
+policy must restrict the Sylva node/port to the intended users or devices.
+Any allowed peer can use the whole-vault API, including deleting ciphertext;
+the vault passphrase is not API authorization. Configure
+[Tailscale access control](https://tailscale.com/docs/features/access-control)
+before relying on a tailnet-only deployment. Enable mTLS on top when you also
+need client-certificate authentication.
+
 On this host, `http://100.x.x.x:8443` and the short name `sylva` often fail: MagicDNS may not resolve the short label, and packets to the tsnet IP go out `tailscale0` while the node is in-process userspace (hairpin timeout). Use loopback locally, and the FQDN from other tailnet devices:
 
 ```bash

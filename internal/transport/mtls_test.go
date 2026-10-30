@@ -182,6 +182,11 @@ func TestStartListensOnTailscale(t *testing.T) {
 
 func startMTLSServer(t *testing.T) (config.ServerConfig, config.ClientConfig) {
 	t.Helper()
+	return startMTLSServerAt(t, "127.0.0.1:0")
+}
+
+func startMTLSServerAt(t *testing.T, addr string) (config.ServerConfig, config.ClientConfig) {
+	t.Helper()
 	config.IsolateProcessEnv(t)
 	envPath := filepath.Join("..", "..", ".env.example")
 	bundle := writeMTLSBundle(t, t.TempDir(), "sylva")
@@ -190,7 +195,7 @@ func startMTLSServer(t *testing.T) (config.ServerConfig, config.ClientConfig) {
 	if err != nil {
 		t.Fatalf("load server config: %v", err)
 	}
-	srvCfg.ListenAddr = net.JoinHostPort("127.0.0.1", "0")
+	srvCfg.ListenAddr = addr
 	srvCfg.DBPath = filepath.Join(t.TempDir(), "sylvad.db")
 	srvCfg.EnableMTLS = true
 	srvCfg.CACertPath = bundle.ca
@@ -231,8 +236,12 @@ func startMTLSServer(t *testing.T) (config.ServerConfig, config.ClientConfig) {
 	clientCfg.CACertPath = bundle.ca
 	clientCfg.ClientCertPath = bundle.clientCert
 	clientCfg.ClientKeyPath = bundle.clientKey
-	clientCfg.ServerURL = "https://" + ln.Addr().String()
-	waitForTLS(t, ln.Addr().String())
+	_, port, err := net.SplitHostPort(ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientCfg.ServerURL = "https://" + net.JoinHostPort("127.0.0.1", port)
+	waitForTLS(t, net.JoinHostPort("127.0.0.1", port))
 	return srvCfg, clientCfg
 }
 

@@ -22,6 +22,10 @@ Logins sit in a domain tree. `mail.company.com` can inherit `company.com` instea
 
 Setup: [docs/setup.md](docs/setup.md). Optional TLS 1.3 mTLS: [docs/mtls.md](docs/mtls.md). Optional Tailscale: [docs/tailscale.md](docs/tailscale.md).
 
+Plain HTTP is restricted to loopback. Remote access requires mTLS or the
+embedded Tailscale listener with a restrictive tailnet policy. Docker Compose
+requires mTLS certificates and publishes only to localhost by default.
+
 ## Use
 
 ```bash

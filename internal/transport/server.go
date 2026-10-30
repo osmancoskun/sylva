@@ -121,7 +121,7 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 	}
 
-	return s.Serve(ctx, ln)
+	return s.serve(ctx, ln, s.cfg.EnableTailscale)
 }
 
 func (s *Server) closeTailscale() {
@@ -137,7 +137,17 @@ func (s *Server) closeTailscale() {
 // Serve accepts incoming connections on the provided listener and performs a
 // graceful shutdown when ctx is canceled.
 func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
+	return s.serve(ctx, ln, false)
+}
+
+func (s *Server) serve(ctx context.Context, ln net.Listener, tailnet bool) error {
 	defer s.closeTailscale()
+	if ln != nil {
+		defer ln.Close()
+	}
+	if err := s.validateListener(ln, tailnet); err != nil {
+		return err
+	}
 
 	serveLn := ln
 	if s.cfg.EnableMTLS {

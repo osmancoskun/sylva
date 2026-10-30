@@ -19,6 +19,18 @@ make build
 
 Both commands take `-env PATH` (default `.env`). `sylvad -addr host:port` overrides the listen address. `sylva -server URL` overrides the daemon URL for one invocation. mTLS and Tailscale are not flags: `sylva enable mtls` / `sylva enable tailscale` writes `.sylva/config` once.
 
+Plain HTTP is accepted only on an actual loopback listener (`127.0.0.1` or
+`::1`). Binding `0.0.0.0`, an empty host, a LAN address, or even a host Tailscale
+IP requires mTLS. This applies to `-addr` overrides too. For remote access,
+enable mTLS before binding a network interface, or use the embedded tsnet
+listener described in [tailscale.md](tailscale.md).
+
+Loopback HTTP trusts local callers: it has no separate API authentication, so
+local processes can read ciphertext and mutate/delete records without the vault
+passphrase. Do not expose it through an unauthenticated reverse proxy, port
+forward, or tunnel. Every client certificate accepted by mTLS, or peer allowed
+to reach tsnet by tailnet policy, has access to the same whole-vault API.
+
 ## Start the daemon
 
 ```bash
@@ -145,7 +157,12 @@ retained heap grows with repeated work, compare profiles at increasing workload
 sizes before adding a stable regression bound. Machine-dependent memory limits
 are not used as CI pass/fail thresholds.
 
-`docker-smoke` brings up compose (`sylvad` as hostname `sylvad`). `make docker-down` removes the volume.
+`docker-smoke` brings up compose (`sylvad` as hostname `sylvad`) over mTLS.
+First create the certificates in [mtls.md](mtls.md#docker), including the
+`sylvad` DNS SAN. Noninteractive secret commands also need an explicitly set
+test master passphrase. Run smoke tests against disposable test data; the
+commands write to the Compose vault volume. `make docker-down` removes that
+volume.
 
 ## Next
 
