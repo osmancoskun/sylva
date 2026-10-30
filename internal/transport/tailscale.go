@@ -36,10 +36,10 @@ func listenOnTailnet(ctx context.Context, cfg config.ServerConfig, logger *slog.
 		Dir:           cfg.TailscaleStateDir,
 		AdvertiseTags: cfg.TailscaleTags,
 		Logf: func(format string, args ...any) {
-			logger.Info("tsnet "+strings.TrimSpace(fmt.Sprintf(format, args...)))
+			logger.Info("tsnet " + strings.TrimSpace(fmt.Sprintf(format, args...)))
 		},
 		UserLogf: func(format string, args ...any) {
-			logger.Info("tsnet "+strings.TrimSpace(fmt.Sprintf(format, args...)))
+			logger.Info("tsnet " + strings.TrimSpace(fmt.Sprintf(format, args...)))
 		},
 	}
 	if cfg.TailscaleAuthKey != "" {
