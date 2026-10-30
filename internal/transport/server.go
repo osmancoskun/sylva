@@ -16,6 +16,7 @@ import (
 
 	"github.com/osman/sylva/internal/api"
 	"github.com/osman/sylva/internal/config"
+	"github.com/osman/sylva/internal/limits"
 	"github.com/osman/sylva/internal/storage"
 )
 
@@ -35,6 +36,8 @@ type Server struct {
 
 // NewServer creates and configures a new transport Server instance.
 func NewServer(cfg config.ServerConfig, store storage.Store, logger *slog.Logger) *Server {
+	cfg.MaxBodyBytes = limits.OrDefault(cfg.MaxBodyBytes, limits.DefaultBodyBytes)
+	cfg.MaxVaultBytes = limits.OrDefault(cfg.MaxVaultBytes, limits.DefaultVaultBytes)
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -144,6 +147,12 @@ func (s *Server) serve(ctx context.Context, ln net.Listener, tailnet bool) error
 	defer s.closeTailscale()
 	if ln != nil {
 		defer ln.Close()
+	}
+	if err := limits.Validate("max_body_bytes", s.cfg.MaxBodyBytes); err != nil {
+		return err
+	}
+	if err := limits.Validate("max_vault_bytes", s.cfg.MaxVaultBytes); err != nil {
+		return err
 	}
 	if err := s.validateListener(ln, tailnet); err != nil {
 		return err

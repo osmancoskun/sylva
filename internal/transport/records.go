@@ -13,11 +13,9 @@ import (
 
 func (s *Server) handlePutRecord(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
-	r.Body = http.MaxBytesReader(w, r.Body, s.cfg.MaxBodyBytes)
 
 	var rec vault.EncryptedRecord
-	if err := json.NewDecoder(r.Body).Decode(&rec); err != nil {
-		writeJSON(w, http.StatusBadRequest, api.ErrorBody{Error: "invalid encrypted record payload"})
+	if !readRequestJSON(w, r, &rec, s.cfg.MaxBodyBytes, "max_body_bytes") {
 		return
 	}
 	if rec.ID == "" || rec.BlindIndex == "" || rec.Type == "" {
@@ -42,12 +40,10 @@ func (s *Server) handlePutRecord(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleUpdateRecord(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
-	r.Body = http.MaxBytesReader(w, r.Body, s.cfg.MaxBodyBytes)
 
 	id := r.PathValue(api.ParamID)
 	var rec vault.EncryptedRecord
-	if err := json.NewDecoder(r.Body).Decode(&rec); err != nil {
-		writeJSON(w, http.StatusBadRequest, api.ErrorBody{Error: "invalid encrypted record payload"})
+	if !readRequestJSON(w, r, &rec, s.cfg.MaxBodyBytes, "max_body_bytes") {
 		return
 	}
 	if rec.ID == "" {
@@ -128,7 +124,7 @@ func (s *Server) handleListRecords(w http.ResponseWriter, r *http.Request) {
 	if recs == nil {
 		recs = []*vault.EncryptedRecord{}
 	}
-	writeJSON(w, http.StatusOK, api.RecordsBody{Records: recs})
+	s.writeVaultJSON(w, api.RecordsBody{Records: recs})
 }
 
 func (s *Server) handleGetSalt(w http.ResponseWriter, r *http.Request) {
@@ -146,10 +142,12 @@ func (s *Server) handleGetSalt(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handlePutSalt(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
-	r.Body = http.MaxBytesReader(w, r.Body, s.cfg.MaxBodyBytes)
 
 	var body api.SaltBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.SaltHex == "" {
+	if !readRequestJSON(w, r, &body, s.cfg.MaxBodyBytes, "max_body_bytes") {
+		return
+	}
+	if body.SaltHex == "" {
 		writeJSON(w, http.StatusBadRequest, api.ErrorBody{Error: "salt_hex is required"})
 		return
 	}
@@ -197,7 +195,12 @@ func writeStorageError(w http.ResponseWriter, err error) {
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		status = http.StatusInternalServerError
+		body = []byte(`{"error":"failed to encode response"}`)
+	}
 	w.Header().Set("Content-Type", api.ContentTypeJSON)
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(payload)
+	_, _ = w.Write(body)
 }

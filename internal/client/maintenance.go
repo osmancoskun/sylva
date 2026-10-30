@@ -7,13 +7,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/osman/sylva/internal/config"
 	"github.com/osman/sylva/internal/crypto"
+	"github.com/osman/sylva/internal/limits"
 	"github.com/osman/sylva/internal/vault"
 )
 
@@ -187,7 +187,7 @@ func (v *Vault) Backup(ctx context.Context, path string) error {
 	}
 	defer os.Remove(file.Name())
 	defer file.Close()
-	if err := json.NewEncoder(file).Encode(backupFile{backupHeader: header, Envelope: env}); err != nil {
+	if err := json.NewEncoder(&limits.Writer{Writer: file, Scope: "backup", Limit: v.cfg.MaxBackupBytes, Setting: "max_backup_bytes"}).Encode(backupFile{backupHeader: header, Envelope: env}); err != nil {
 		return err
 	}
 	if err := file.Sync(); err != nil {
@@ -210,12 +210,16 @@ func (v *Vault) Restore(ctx context.Context, path, passphrase string) error {
 		return err
 	}
 	defer file.Close()
-	raw, err := io.ReadAll(io.LimitReader(file, 64*1024*1024+1))
+	info, err := file.Stat()
 	if err != nil {
 		return err
 	}
-	if len(raw) > 64*1024*1024 {
-		return errors.New("backup exceeds 64 MiB")
+	if info.Size() > v.cfg.MaxBackupBytes {
+		return &limits.SizeError{Scope: "backup", Setting: "max_backup_bytes", Limit: v.cfg.MaxBackupBytes}
+	}
+	raw, err := limits.Read(file, v.cfg.MaxBackupBytes, "backup", "max_backup_bytes")
+	if err != nil {
+		return err
 	}
 	var archive backupFile
 	if err := json.Unmarshal(raw, &archive); err != nil {

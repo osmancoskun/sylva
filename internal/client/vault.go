@@ -14,6 +14,7 @@ import (
 
 	"github.com/osman/sylva/internal/config"
 	"github.com/osman/sylva/internal/crypto"
+	"github.com/osman/sylva/internal/limits"
 	"github.com/osman/sylva/internal/storage"
 	"github.com/osman/sylva/internal/transport"
 	"github.com/osman/sylva/internal/tree"
@@ -44,6 +45,10 @@ type Vault struct {
 
 // Open constructs a Vault client. Unlock must be called before secret operations.
 func Open(cfg config.ClientConfig) (*Vault, error) {
+	cfg.MaxBackupBytes = limits.OrDefault(cfg.MaxBackupBytes, limits.DefaultBackupBytes)
+	if err := limits.Validate("max_backup_bytes", cfg.MaxBackupBytes); err != nil {
+		return nil, err
+	}
 	remote, err := transport.NewClient(cfg)
 	if err != nil {
 		return nil, err

@@ -48,9 +48,11 @@ func (s *Server) handleGetKeyCheck(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handlePutKeyCheck(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
-	r.Body = http.MaxBytesReader(w, r.Body, s.cfg.MaxBodyBytes)
 	var env crypto.Envelope
-	if err := json.NewDecoder(r.Body).Decode(&env); err != nil || len(env.Nonce) != 12 || len(env.Ciphertext) < 16 {
+	if !readRequestJSON(w, r, &env, s.cfg.MaxBodyBytes, "max_body_bytes") {
+		return
+	}
+	if len(env.Nonce) != 12 || len(env.Ciphertext) < 16 {
 		writeJSON(w, http.StatusBadRequest, api.ErrorBody{Error: "invalid vault key verifier"})
 		return
 	}

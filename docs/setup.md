@@ -103,6 +103,46 @@ Updates carry the version that was read before editing. The server atomically ac
 
 Clipboard backends: `auto` (X11 or Wayland), `os`, `memory`, `file`. `auto`/`os` need the agent. Docker smoke uses `memory`.
 
+## Large vaults and transfer limits
+
+The limits apply to encoded JSON/file bytes, including base64 and metadata,
+not just the plaintext secret length:
+
+| Setting | Default | Applies to |
+| --- | --- | --- |
+| `max_body_bytes` | 1 MiB | Individual records and metadata requests/responses |
+| `max_vault_bytes` | 64 MiB | Record lists and snapshot download/replacement |
+| `max_backup_bytes` | 128 MiB | Encrypted backup files, both writing and restoring |
+
+These settings are independent. A snapshot cannot bypass the individual record
+limit. Backup files need extra room because their authenticated outer envelope
+base64-encodes the snapshot again. An oversized response is rejected before
+JSON decoding instead of being silently truncated. Server-side size rejections
+return HTTP 413. Oversized writes are rejected before changing the database;
+failed backups do not publish a destination file.
+
+For larger vaults, put overrides in `.sylva/config` on the relevant clients and
+server, then restart the daemon. For example:
+
+```ini
+max_vault_bytes=134217728
+max_backup_bytes=268435456
+```
+
+`max_backup_bytes` is a client setting. Process environment overrides are also
+supported (`SYLVA_MAX_VAULT_BYTES`, `SYLVA_MAX_BACKUP_BYTES`); these tunables are
+not loaded from `.env`. For Compose, edit the mounted `docker/mtls.conf` or
+provide a deployment-specific config mount. Keep TLS enabled.
+
+All limits must be positive; zero does not mean unlimited. Client and server
+limits can differ, so raise both sides where needed. Existing `sylva-backup-v1`
+archives remain compatible. Large transfers can also need larger
+`client_timeout`, `server_read_timeout`, and `server_write_timeout`; the CLI's
+request deadline remains in effect. Listing and snapshot/backup operations
+still materialize whole datasets in memory. These limits provide configurable
+transfer bounds, not streaming or pagination; allow memory headroom for JSON,
+decoded records, and cryptographic buffers before raising them.
+
 ## Same machine settings on two hosts
 
 `SYLVA_HOST` is both the daemon bind host (unless `server_addr` / `SYLVA_SERVER_ADDR` is set) and the host the CLI dials. On a remote daemon, the client `.env` should use that hostname (or `sylva -server`). The server certificate SAN must match that name if you turn on mTLS. Host and port can later live in `.sylva/config` instead of `.env`; process environment still overrides.

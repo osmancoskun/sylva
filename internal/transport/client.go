@@ -12,6 +12,7 @@ import (
 
 	"github.com/osman/sylva/internal/api"
 	"github.com/osman/sylva/internal/config"
+	"github.com/osman/sylva/internal/limits"
 	"github.com/osman/sylva/internal/storage"
 	"github.com/osman/sylva/internal/vault"
 )
@@ -45,6 +46,8 @@ func (e *HTTPError) Unwrap() error {
 		return storage.ErrConflict
 	case http.StatusNotFound:
 		return storage.ErrNotFound
+	case http.StatusRequestEntityTooLarge:
+		return ErrPayloadTooLarge
 	default:
 		return nil
 	}
@@ -52,26 +55,36 @@ func (e *HTTPError) Unwrap() error {
 
 // Client communicates with a remote or local sylvad server.
 type Client struct {
-	baseURL      string
-	apiPrefix    string
-	maxBodyBytes int64
-	httpClient   *http.Client
-	generation   atomic.Value
-	kdf          atomic.Pointer[config.CryptoConfig]
+	baseURL       string
+	apiPrefix     string
+	maxBodyBytes  int64
+	maxVaultBytes int64
+	httpClient    *http.Client
+	generation    atomic.Value
+	kdf           atomic.Pointer[config.CryptoConfig]
 }
 
 // NewClient constructs a new transport Client from the given ClientConfig.
 func NewClient(cfg config.ClientConfig) (*Client, error) {
+	cfg.MaxBodyBytes = limits.OrDefault(cfg.MaxBodyBytes, limits.DefaultBodyBytes)
+	cfg.MaxVaultBytes = limits.OrDefault(cfg.MaxVaultBytes, limits.DefaultVaultBytes)
+	if err := limits.Validate("max_body_bytes", cfg.MaxBodyBytes); err != nil {
+		return nil, err
+	}
+	if err := limits.Validate("max_vault_bytes", cfg.MaxVaultBytes); err != nil {
+		return nil, err
+	}
 	httpClient, err := newHTTPClient(cfg)
 	if err != nil {
 		return nil, err
 	}
 	baseURL := strings.TrimRight(cfg.ServerURL, "/")
 	return &Client{
-		baseURL:      baseURL,
-		apiPrefix:    strings.TrimRight(cfg.APIPrefix, "/"),
-		maxBodyBytes: cfg.MaxBodyBytes,
-		httpClient:   httpClient,
+		baseURL:       baseURL,
+		apiPrefix:     strings.TrimRight(cfg.APIPrefix, "/"),
+		maxBodyBytes:  cfg.MaxBodyBytes,
+		maxVaultBytes: cfg.MaxVaultBytes,
+		httpClient:    httpClient,
 	}, nil
 }
 
@@ -159,7 +172,7 @@ func (c *Client) ListRecords(ctx context.Context, secretType vault.SecretType) (
 		u = c.apiURL(api.RecordsQuery(api.QuerySecretType, string(secretType)))
 	}
 	var out api.RecordsBody
-	if err := c.doJSON(ctx, http.MethodGet, u, nil, http.StatusOK, &out); err != nil {
+	if err := c.doJSONLimit(ctx, http.MethodGet, u, nil, http.StatusOK, &out, c.maxVaultBytes, "max_vault_bytes"); err != nil {
 		return nil, err
 	}
 	if out.Records == nil {
@@ -194,11 +207,18 @@ func (c *Client) PutSalt(ctx context.Context, salt []byte) error {
 }
 
 func (c *Client) doJSON(ctx context.Context, method, reqURL string, in any, wantStatus int, out any) error {
+	return c.doJSONLimit(ctx, method, reqURL, in, wantStatus, out, c.maxBodyBytes, "max_body_bytes")
+}
+
+func (c *Client) doJSONLimit(ctx context.Context, method, reqURL string, in any, wantStatus int, out any, n int64, setting string) error {
 	var reader io.Reader
 	if in != nil {
 		payload, err := json.Marshal(in)
 		if err != nil {
 			return fmt.Errorf("marshal request: %w", err)
+		}
+		if int64(len(payload)) > n {
+			return &limits.SizeError{Scope: "request", Setting: setting, Limit: n}
 		}
 		reader = bytes.NewReader(payload)
 	}
@@ -224,7 +244,7 @@ func (c *Client) doJSON(ctx context.Context, method, reqURL string, in any, want
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, c.maxBodyBytes))
+	body, err := limits.Read(resp.Body, n, "response", setting)
 	if err != nil {
 		return fmt.Errorf("read response: %w", err)
 	}

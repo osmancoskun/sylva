@@ -8,6 +8,8 @@ import (
 	"net"
 	"strings"
 	"time"
+
+	"github.com/osman/sylva/internal/limits"
 )
 
 // CryptoConfig holds centralized parameters for Argon2id key derivation and
@@ -32,6 +34,7 @@ type ServerConfig struct {
 	APIPrefix            string
 	DBPath               string
 	MaxBodyBytes         int64
+	MaxVaultBytes        int64
 	SQLiteBusyTimeout    time.Duration
 	RecordInitialVersion int
 	ReadHeaderTimeout    time.Duration
@@ -60,6 +63,8 @@ type ClientConfig struct {
 	APIPrefix            string
 	Timeout              time.Duration
 	MaxBodyBytes         int64
+	MaxVaultBytes        int64
+	MaxBackupBytes       int64
 	CacheEnabled         bool
 	CachePath            string
 	SQLiteBusyTimeout    time.Duration
@@ -189,7 +194,7 @@ func LoadServerConfig(envPath string) (ServerConfig, error) {
 	if err != nil {
 		return ServerConfig{}, err
 	}
-	maxBodyBytes, err := s.int64Val("max_body_bytes")
+	maxBodyBytes, maxVaultBytes, err := transferLimits(s)
 	if err != nil {
 		return ServerConfig{}, err
 	}
@@ -233,6 +238,7 @@ func LoadServerConfig(envPath string) (ServerConfig, error) {
 		APIPrefix:            strings.TrimRight(s.get("api_prefix"), "/"),
 		DBPath:               s.get("server_db_path"),
 		MaxBodyBytes:         maxBodyBytes,
+		MaxVaultBytes:        maxVaultBytes,
 		SQLiteBusyTimeout:    sqliteBusyTimeout,
 		RecordInitialVersion: recordInitialVersion,
 		ReadHeaderTimeout:    readHeaderTimeout,
@@ -274,8 +280,15 @@ func LoadClientConfig(envPath string) (ClientConfig, error) {
 	if err != nil {
 		return ClientConfig{}, err
 	}
-	maxBodyBytes, err := s.int64Val("max_body_bytes")
+	maxBodyBytes, maxVaultBytes, err := transferLimits(s)
 	if err != nil {
+		return ClientConfig{}, err
+	}
+	maxBackupBytes, err := s.int64Val("max_backup_bytes")
+	if err != nil {
+		return ClientConfig{}, err
+	}
+	if err := limits.Validate("max_backup_bytes", maxBackupBytes); err != nil {
 		return ClientConfig{}, err
 	}
 	cacheEnabled, err := s.boolVal("client_cache_enabled")
@@ -343,6 +356,8 @@ func LoadClientConfig(envPath string) (ClientConfig, error) {
 		APIPrefix:            strings.TrimRight(s.get("api_prefix"), "/"),
 		Timeout:              timeout,
 		MaxBodyBytes:         maxBodyBytes,
+		MaxVaultBytes:        maxVaultBytes,
+		MaxBackupBytes:       maxBackupBytes,
 		CacheEnabled:         cacheEnabled,
 		CachePath:            s.get("client_cache_path"),
 		SQLiteBusyTimeout:    sqliteBusyTimeout,
@@ -396,4 +411,22 @@ func splitCommaList(raw string) []string {
 		}
 	}
 	return out
+}
+
+func transferLimits(s *settings) (int64, int64, error) {
+	body, err := s.int64Val("max_body_bytes")
+	if err != nil {
+		return 0, 0, err
+	}
+	if err := limits.Validate("max_body_bytes", body); err != nil {
+		return 0, 0, err
+	}
+	vault, err := s.int64Val("max_vault_bytes")
+	if err != nil {
+		return 0, 0, err
+	}
+	if err := limits.Validate("max_vault_bytes", vault); err != nil {
+		return 0, 0, err
+	}
+	return body, vault, nil
 }
