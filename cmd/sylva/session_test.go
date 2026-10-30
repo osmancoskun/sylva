@@ -79,6 +79,9 @@ func TestUnlockOnlyPublishesVerifiedKeyToAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if ac == nil {
+		t.Fatal("agent did not become ready before the deadline")
+	}
 	if err := runUnlock(cfg); err != nil {
 		t.Fatal(err)
 	}

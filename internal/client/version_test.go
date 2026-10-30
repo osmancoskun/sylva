@@ -70,11 +70,14 @@ func TestSimultaneousClientUpdatesAllowOnlyOneWriter(t *testing.T) {
 	putCachedToken(t, writer, "original")
 	items := make([]*vault.SecretItem, 2)
 	for i, v := range []*sylva.Vault{reader, writer} {
-		var err error
-		items[i], err = v.GetSecret(ctx, vault.SecretTypeToken, "shared-token")
+		item, err := v.GetSecret(ctx, vault.SecretTypeToken, "shared-token")
 		if err != nil {
 			t.Fatal(err)
 		}
+		if item == nil || item.Token == nil {
+			t.Fatal("expected a token record")
+		}
+		items[i] = item
 	}
 	items[0].Token.Token = "first writer"
 	items[1].Token.Token = "second writer"

@@ -92,10 +92,10 @@ func (s *SQLiteStore) Snapshot(ctx context.Context, records bool) (*vault.Snapsh
 		if err != nil {
 			return nil, err
 		}
+		defer rows.Close()
 		for rows.Next() {
 			rec, err := scanRecord(rows)
 			if err != nil {
-				_ = rows.Close()
 				return nil, err
 			}
 			out.Records = append(out.Records, rec)
