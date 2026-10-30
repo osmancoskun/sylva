@@ -37,6 +37,7 @@ type Manager struct {
 	mu      sync.Mutex
 	gen     uint64
 	done    chan struct{}
+	stop    chan struct{}
 	cleared func()
 }
 
@@ -94,15 +95,23 @@ func (m *Manager) schedule(text string) {
 	gen := m.gen
 	done := make(chan struct{})
 	m.done = done
+	if m.stop != nil {
+		close(m.stop)
+	}
+	stop := make(chan struct{})
+	m.stop = stop
 	after := m.after
 	m.mu.Unlock()
 
 	go func() {
 		timer := time.NewTimer(after)
 		defer timer.Stop()
-		<-timer.C
-		m.clearIfUnchanged(gen, text)
-		close(done)
+		defer close(done)
+		select {
+		case <-timer.C:
+			m.clearIfUnchanged(gen, text)
+		case <-stop:
+		}
 	}()
 }
 
@@ -141,6 +150,10 @@ func (m *Manager) Read() (string, error) {
 func (m *Manager) Clear() error {
 	m.mu.Lock()
 	m.gen++
+	if m.stop != nil {
+		close(m.stop)
+		m.stop = nil
+	}
 	m.mu.Unlock()
 	return m.backend.Clear()
 }
@@ -164,6 +177,10 @@ func (m *Manager) ClearAfter() time.Duration {
 func (m *Manager) Close() error {
 	m.mu.Lock()
 	m.gen++
+	if m.stop != nil {
+		close(m.stop)
+		m.stop = nil
+	}
 	m.mu.Unlock()
 	return m.backend.Close()
 }

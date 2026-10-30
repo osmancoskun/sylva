@@ -27,6 +27,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  init                 Initialize the vault salt on the server\n")
 		fmt.Fprintf(os.Stderr, "  unlock               Unlock the session agent / OS keyring\n")
 		fmt.Fprintf(os.Stderr, "  lock                 Wipe the session agent / OS keyring\n")
+		fmt.Fprintf(os.Stderr, "  passwd               Change the master passphrase atomically\n")
+		fmt.Fprintf(os.Stderr, "  backup <file>        Write an encrypted vault backup\n")
+		fmt.Fprintf(os.Stderr, "  restore <file>       Restore into an uninitialized vault\n")
 		fmt.Fprintf(os.Stderr, "  agent                Run the local session agent (foreground)\n")
 		fmt.Fprintf(os.Stderr, "  set [<id> [<password>] [<type>]]\n")
 		fmt.Fprintf(os.Stderr, "                       Store a secret (interactive if args are omitted)\n")
@@ -90,6 +93,26 @@ func main() {
 		}
 	case "agent":
 		if err := runAgent(cfg); err != nil {
+			fatal(err)
+		}
+	case "passwd":
+		if len(args) != 1 {
+			fatal(fmt.Errorf("usage: sylva passwd"))
+		}
+		if err := runPasswd(cfg); err != nil {
+			fatal(err)
+		}
+	case "backup", "restore":
+		if len(args) != 2 {
+			fatal(fmt.Errorf("usage: sylva %s <file>", cmd))
+		}
+		var err error
+		if cmd == "backup" {
+			err = runBackup(cfg, args[1])
+		} else {
+			err = runRestore(cfg, args[1])
+		}
+		if err != nil {
 			fatal(err)
 		}
 	case "set":

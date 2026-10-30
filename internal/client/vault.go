@@ -115,6 +115,12 @@ func (v *Vault) Unlock(ctx context.Context, passphrase string) error {
 	if err != nil {
 		return err
 	}
+	if kdf := v.remote.KDFConfig(); kdf != nil {
+		if err := validateKDF(*kdf); err != nil {
+			return err
+		}
+		v.cfg.Crypto = *kdf
+	}
 	key, err := crypto.DeriveKey([]byte(passphrase), salt, v.cfg.Crypto)
 	if err != nil {
 		return err
@@ -475,6 +481,10 @@ func (v *Vault) DeleteSecret(ctx context.Context, secretType vault.SecretType, i
 		return err
 	}
 	if err := v.remote.DeleteRecord(ctx, rec.ID); err != nil {
+		if errors.Is(err, storage.ErrVaultChanged) {
+			v.clearMasterKey()
+			v.disableCache()
+		}
 		if errors.Is(err, storage.ErrNotFound) {
 			v.cacheForget(ctx, rec.BlindIndex)
 		}
@@ -511,6 +521,10 @@ func (v *Vault) UpdateSecret(ctx context.Context, item *vault.SecretItem) error 
 		return err
 	}
 	if _, err := v.remote.UpdateRecord(ctx, sealed); err != nil {
+		if errors.Is(err, storage.ErrVaultChanged) {
+			v.clearMasterKey()
+			v.disableCache()
+		}
 		if errors.Is(err, storage.ErrNotFound) || errors.Is(err, storage.ErrVersionConflict) {
 			v.cacheForget(ctx, sealed.BlindIndex)
 		}
@@ -583,6 +597,11 @@ func (v *Vault) createRecord(ctx context.Context, item *vault.SecretItem) error 
 		return err
 	}
 	if err := v.putRecord(ctx, sealed); err != nil {
+		if errors.Is(err, storage.ErrVaultChanged) {
+			v.clearMasterKey()
+			v.disableCache()
+			return err
+		}
 		if errors.Is(err, storage.ErrConflict) {
 			return AlreadyExists(item.Type, item.Identifier)
 		}

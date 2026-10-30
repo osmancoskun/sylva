@@ -69,6 +69,7 @@ type ClientConfig struct {
 	ClipboardBackend     string
 	ClipboardFile        string
 	AgentEnabled         bool
+	AgentIdleTimeout     time.Duration
 	AgentSocketPath      string
 	AgentLogPath         string
 	LogLevel             slog.Level
@@ -297,6 +298,10 @@ func LoadClientConfig(envPath string) (ClientConfig, error) {
 	if err != nil {
 		return ClientConfig{}, err
 	}
+	agentIdleTimeout, err := s.durationVal("agent_idle_timeout")
+	if err != nil || agentIdleTimeout <= 0 {
+		return ClientConfig{}, fmt.Errorf("agent_idle_timeout must be a positive duration")
+	}
 	logLevel, err := parseLogLevel(s.get("log_level"))
 	if err != nil {
 		return ClientConfig{}, err
@@ -347,6 +352,7 @@ func LoadClientConfig(envPath string) (ClientConfig, error) {
 		ClipboardBackend:     strings.ToLower(s.get("clipboard_backend")),
 		ClipboardFile:        s.get("clipboard_file"),
 		AgentEnabled:         agentEnabled,
+		AgentIdleTimeout:     agentIdleTimeout,
 		AgentSocketPath:      s.get("agent_socket_path"),
 		AgentLogPath:         s.get("agent_log_path"),
 		LogLevel:             logLevel,

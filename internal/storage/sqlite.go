@@ -34,6 +34,12 @@ CREATE TABLE IF NOT EXISTS metadata (
 	key TEXT PRIMARY KEY,
 	value BLOB NOT NULL
 );
+CREATE TABLE IF NOT EXISTS vault_state (
+	id INTEGER PRIMARY KEY CHECK (id=1),
+	revision INTEGER NOT NULL,
+	generation TEXT NOT NULL
+);
+INSERT OR IGNORE INTO vault_state VALUES (1,0,'');
 `
 
 // SQLiteStore is a file-backed Store implementation.
@@ -67,6 +73,15 @@ func OpenSQLite(path string, busyTimeout time.Duration) (*SQLiteStore, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate sqlite schema: %w", err)
 	}
+	for _, table := range []string{"records", "metadata"} {
+		for _, operation := range []string{"INSERT", "UPDATE", "DELETE"} {
+			q := fmt.Sprintf(`CREATE TRIGGER IF NOT EXISTS revision_%s_%s AFTER %s ON %s BEGIN UPDATE vault_state SET revision=revision+1 WHERE id=1; END`, table, operation, operation, table)
+			if _, err := db.Exec(q); err != nil {
+				_ = db.Close()
+				return nil, fmt.Errorf("create revision trigger: %w", err)
+			}
+		}
+	}
 
 	return &SQLiteStore{db: db}, nil
 }
@@ -97,7 +112,7 @@ func (s *SQLiteStore) Put(ctx context.Context, rec *vault.EncryptedRecord) error
 		return err
 	}
 
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.execGuarded(ctx, `
 		INSERT INTO records (
 			id, type, blind_index, parent_blind_index, nonce, ciphertext, version, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -122,7 +137,7 @@ func (s *SQLiteStore) Update(ctx context.Context, rec *vault.EncryptedRecord) er
 		return ErrVersionConflict
 	}
 
-	res, err := s.db.ExecContext(ctx, `
+	res, err := s.execGuarded(ctx, `
 		UPDATE records SET
 			type=?,
 			blind_index=?,
@@ -211,7 +226,7 @@ func (s *SQLiteStore) List(ctx context.Context, secretType vault.SecretType) ([]
 
 // Delete removes a record by ID.
 func (s *SQLiteStore) Delete(ctx context.Context, id string) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM records WHERE id = ?`, id)
+	res, err := s.execGuarded(ctx, `DELETE FROM records WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("delete record %s: %w", id, err)
 	}
@@ -227,7 +242,7 @@ func (s *SQLiteStore) Delete(ctx context.Context, id string) error {
 
 // PutMetadata stores an opaque metadata value. Existing keys are overwritten.
 func (s *SQLiteStore) PutMetadata(ctx context.Context, key string, value []byte) error {
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.execGuarded(ctx, `
 		INSERT INTO metadata (key, value) VALUES (?, ?)
 		ON CONFLICT(key) DO UPDATE SET value=excluded.value
 	`, key, value)
@@ -239,7 +254,7 @@ func (s *SQLiteStore) PutMetadata(ctx context.Context, key string, value []byte)
 
 // CreateMetadata initializes metadata without replacing an existing value.
 func (s *SQLiteStore) CreateMetadata(ctx context.Context, key string, value []byte) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO metadata (key, value) VALUES (?, ?)`, key, value)
+	_, err := s.execGuarded(ctx, `INSERT INTO metadata (key, value) VALUES (?, ?)`, key, value)
 	if isUniqueConstraint(err) {
 		return ErrConflict
 	}

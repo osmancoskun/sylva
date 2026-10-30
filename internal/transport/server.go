@@ -60,6 +60,8 @@ func NewServer(cfg config.ServerConfig, store storage.Store, logger *slog.Logger
 		api.EndpointPutSalt:      s.handlePutSalt,
 		api.EndpointGetKeyCheck:  s.handleGetKeyCheck,
 		api.EndpointPutKeyCheck:  s.handlePutKeyCheck,
+		api.EndpointGetSnapshot:  s.handleGetSnapshot,
+		api.EndpointPutSnapshot:  s.handlePutSnapshot,
 	}
 	for _, ep := range api.HTTPEndpoints() {
 		h, ok := handlers[ep.Name]

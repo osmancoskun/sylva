@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/osman/sylva/internal/config"
+	"github.com/osman/sylva/internal/crypto"
 	"github.com/osman/sylva/internal/vault"
 )
 
@@ -18,6 +20,7 @@ const (
 	PathRecordID      = "/records/{id}"
 	PathVaultSalt     = "/vault/salt"
 	PathVaultKeyCheck = "/vault/key-check"
+	PathVaultSnapshot = "/vault/snapshot"
 )
 
 // Query and path parameter names shared by the HTTP client and server.
@@ -40,6 +43,8 @@ const (
 	EndpointPutSalt      = "vault.salt.put"
 	EndpointGetKeyCheck  = "vault.key-check.get"
 	EndpointPutKeyCheck  = "vault.key-check.put"
+	EndpointGetSnapshot  = "vault.snapshot.get"
+	EndpointPutSnapshot  = "vault.snapshot.put"
 )
 
 // ContentTypeJSON is the JSON media type used by every HTTP API response.
@@ -68,6 +73,8 @@ func HTTPEndpoints() []Endpoint {
 		{Name: EndpointPutSalt, Method: http.MethodPut, Path: PathVaultSalt, Prefixed: true},
 		{Name: EndpointGetKeyCheck, Method: http.MethodGet, Path: PathVaultKeyCheck, Prefixed: true},
 		{Name: EndpointPutKeyCheck, Method: http.MethodPut, Path: PathVaultKeyCheck, Prefixed: true},
+		{Name: EndpointGetSnapshot, Method: http.MethodGet, Path: PathVaultSnapshot, Prefixed: true},
+		{Name: EndpointPutSnapshot, Method: http.MethodPut, Path: PathVaultSnapshot, Prefixed: true},
 	}
 }
 
@@ -115,6 +122,7 @@ type StatusResponse struct {
 const (
 	ErrorRecordExists          = "record already exists"
 	ErrorRecordVersionConflict = "record changed; fetch it again before updating"
+	ErrorVaultChanged          = "vault changed; unlock it again"
 )
 
 // ErrorBody is the standard HTTP error payload.
@@ -129,5 +137,20 @@ type RecordsBody struct {
 
 // SaltBody is the vault-wide Argon2id salt payload.
 type SaltBody struct {
-	SaltHex string `json:"salt_hex"`
+	SaltHex string               `json:"salt_hex"`
+	KDF     *config.CryptoConfig `json:"kdf,omitempty"`
+}
+
+const HeaderGeneration = "X-Sylva-Generation"
+
+type KeyCheckBody struct {
+	crypto.Envelope
+	Generation string `json:"generation"`
+}
+
+type ReplaceVaultBody struct {
+	ExpectedRevision   int64           `json:"expected_revision"`
+	ExpectedGeneration string          `json:"expected_generation"`
+	EmptyOnly          bool            `json:"empty_only"`
+	Snapshot           *vault.Snapshot `json:"snapshot"`
 }

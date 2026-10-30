@@ -25,7 +25,11 @@ func (s *Server) handlePutRecord(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.store.Put(r.Context(), &rec); err != nil {
+	if err := s.store.Put(storage.WithGeneration(r.Context(), r.Header.Get(api.HeaderGeneration)), &rec); err != nil {
+		if errors.Is(err, storage.ErrVaultChanged) {
+			writeVaultChanged(w)
+			return
+		}
 		if errors.Is(err, storage.ErrConflict) {
 			writeJSON(w, http.StatusConflict, api.ErrorBody{Error: api.ErrorRecordExists})
 			return
@@ -54,7 +58,11 @@ func (s *Server) handleUpdateRecord(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.store.Update(r.Context(), &rec); err != nil {
+	if err := s.store.Update(storage.WithGeneration(r.Context(), r.Header.Get(api.HeaderGeneration)), &rec); err != nil {
+		if errors.Is(err, storage.ErrVaultChanged) {
+			writeVaultChanged(w)
+			return
+		}
 		if errors.Is(err, storage.ErrVersionConflict) {
 			writeJSON(w, http.StatusConflict, api.ErrorBody{Error: api.ErrorRecordVersionConflict})
 			return
@@ -85,7 +93,11 @@ func (s *Server) handleGetRecordByID(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteRecord(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue(api.ParamID)
-	if err := s.store.Delete(r.Context(), id); err != nil {
+	if err := s.store.Delete(storage.WithGeneration(r.Context(), r.Header.Get(api.HeaderGeneration)), id); err != nil {
+		if errors.Is(err, storage.ErrVaultChanged) {
+			writeVaultChanged(w)
+			return
+		}
 		writeStorageError(w, err)
 		return
 	}
@@ -120,12 +132,16 @@ func (s *Server) handleListRecords(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetSalt(w http.ResponseWriter, r *http.Request) {
-	salt, err := s.store.GetMetadata(r.Context(), storage.MetadataKDFSalt)
+	snapshot, err := s.store.Snapshot(r.Context(), false)
 	if err != nil {
 		writeStorageError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, api.SaltBody{SaltHex: hex.EncodeToString(salt)})
+	if len(snapshot.Salt) == 0 {
+		writeStorageError(w, storage.ErrNotFound)
+		return
+	}
+	writeJSON(w, http.StatusOK, api.SaltBody{SaltHex: hex.EncodeToString(snapshot.Salt), KDF: snapshot.KDF})
 }
 
 func (s *Server) handlePutSalt(w http.ResponseWriter, r *http.Request) {
@@ -157,7 +173,11 @@ func (s *Server) handlePutSalt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.store.CreateMetadata(r.Context(), storage.MetadataKDFSalt, salt); err != nil {
+	if err := s.store.CreateMetadata(storage.WithGeneration(r.Context(), r.Header.Get(api.HeaderGeneration)), storage.MetadataKDFSalt, salt); err != nil {
+		if errors.Is(err, storage.ErrVaultChanged) {
+			writeVaultChanged(w)
+			return
+		}
 		if errors.Is(err, storage.ErrConflict) {
 			writeJSON(w, http.StatusConflict, api.ErrorBody{Error: "vault salt is already initialized"})
 			return

@@ -14,7 +14,8 @@ const (
 	// MetadataKDFSalt is the metadata key for the vault-wide Argon2id salt.
 	MetadataKDFSalt = "kdf_salt"
 	// MetadataKeyCheck is the immutable encrypted master-key verifier.
-	MetadataKeyCheck = "key_check_v1"
+	MetadataKeyCheck  = "key_check_v1"
+	MetadataKDFConfig = "kdf_config"
 )
 
 var (
@@ -26,6 +27,7 @@ var (
 
 	// ErrVersionConflict rejects a write based on an outdated record version.
 	ErrVersionConflict = fmt.Errorf("%w: record changed; fetch it again before updating", ErrConflict)
+	ErrVaultChanged    = fmt.Errorf("%w: vault changed; unlock it again", ErrConflict)
 )
 
 // Store is the persistence contract used by both sylvad and the client cache.
@@ -44,4 +46,6 @@ type Store interface {
 	Upsert(ctx context.Context, rec *vault.EncryptedRecord) error
 	ReplaceRecords(ctx context.Context, secretType vault.SecretType, records []*vault.EncryptedRecord) error
 	DeleteByBlindIndex(ctx context.Context, blindIndex string) error
+	Snapshot(ctx context.Context, records bool) (*vault.Snapshot, error)
+	ReplaceVault(ctx context.Context, expectedRevision int64, expectedGeneration string, next *vault.Snapshot, emptyOnly bool) error
 }

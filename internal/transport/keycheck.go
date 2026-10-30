@@ -13,7 +13,15 @@ import (
 
 // GetKeyCheck fetches the encrypted, immutable vault key verifier.
 func (c *Client) GetKeyCheck(ctx context.Context) (*crypto.Envelope, error) {
-	var out crypto.Envelope
+	out, err := c.GetKeyCheckState(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &out.Envelope, nil
+}
+
+func (c *Client) GetKeyCheckState(ctx context.Context) (*api.KeyCheckBody, error) {
+	var out api.KeyCheckBody
 	if err := c.doJSON(ctx, http.MethodGet, c.apiURL(api.PathVaultKeyCheck), nil, http.StatusOK, &out); err != nil {
 		return nil, err
 	}
@@ -26,17 +34,16 @@ func (c *Client) PutKeyCheck(ctx context.Context, env *crypto.Envelope) error {
 }
 
 func (s *Server) handleGetKeyCheck(w http.ResponseWriter, r *http.Request) {
-	raw, err := s.store.GetMetadata(r.Context(), storage.MetadataKeyCheck)
+	snapshot, err := s.store.Snapshot(r.Context(), false)
 	if err != nil {
 		writeStorageError(w, err)
 		return
 	}
-	var env crypto.Envelope
-	if err := json.Unmarshal(raw, &env); err != nil {
-		writeJSON(w, http.StatusInternalServerError, api.ErrorBody{Error: "invalid vault key verifier"})
+	if snapshot.KeyCheck == nil {
+		writeStorageError(w, storage.ErrNotFound)
 		return
 	}
-	writeJSON(w, http.StatusOK, env)
+	writeJSON(w, http.StatusOK, api.KeyCheckBody{Envelope: *snapshot.KeyCheck, Generation: snapshot.Generation})
 }
 
 func (s *Server) handlePutKeyCheck(w http.ResponseWriter, r *http.Request) {
@@ -56,7 +63,11 @@ func (s *Server) handlePutKeyCheck(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, api.ErrorBody{Error: "encode vault key verifier"})
 		return
 	}
-	if err := s.store.CreateMetadata(r.Context(), storage.MetadataKeyCheck, raw); err != nil {
+	if err := s.store.CreateMetadata(storage.WithGeneration(r.Context(), r.Header.Get(api.HeaderGeneration)), storage.MetadataKeyCheck, raw); err != nil {
+		if errors.Is(err, storage.ErrVaultChanged) {
+			writeVaultChanged(w)
+			return
+		}
 		if errors.Is(err, storage.ErrConflict) {
 			writeJSON(w, http.StatusConflict, api.ErrorBody{Error: "vault key verifier is already initialized"})
 			return

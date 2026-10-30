@@ -178,7 +178,9 @@ func runAgent(cfg config.ClientConfig) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	err = agent.Serve(ctx, cfg.AgentSocketPath, clip, log)
+	err = agent.Serve(ctx, cfg.AgentSocketPath, clip, log, agent.Options{IdleTimeout: cfg.AgentIdleTimeout, OnLock: func() error {
+		return agent.NewKeyring(cfg.KeyringEnabled, cfg.KeyringService, cfg.KeyringUser).Delete()
+	}})
 	if err != nil {
 		log.Error("session agent exited", slog.Any("error", err))
 		return err

@@ -63,7 +63,7 @@ func knownKey(key string) bool {
 		"kdf_time", "kdf_memory_kb", "kdf_threads", "kdf_key_len", "kdf_salt_len", "password_default_len",
 		"master_passphrase",
 		"clipboard_clear_after", "clipboard_backend", "clipboard_file",
-		"agent_enabled", "agent_socket_path", "agent_log_path",
+		"agent_enabled", "agent_idle_timeout", "agent_socket_path", "agent_log_path",
 		"keyring_enabled", "keyring_service", "keyring_user",
 		"mtls", "ca_cert_path", "server_cert_path", "server_key_path", "client_cert_path", "client_key_path",
 		"tailscale", "tailscale_node", "tailscale_state_dir", "tailscale_authkey", "tailscale_tags":

@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/osman/sylva/internal/api"
 	"github.com/osman/sylva/internal/clipboard"
@@ -37,10 +38,18 @@ type Server struct {
 	key            []byte
 	copyType       string
 	copyIdentifier string
+	idleTimeout    time.Duration
+	expires        time.Time
+	onLock         func() error
+}
+
+type Options struct {
+	IdleTimeout time.Duration
+	OnLock      func() error
 }
 
 // Serve listens on the configured unix socket until ctx is cancelled.
-func Serve(ctx context.Context, socketPath string, clip *clipboard.Manager, log *slog.Logger) error {
+func Serve(ctx context.Context, socketPath string, clip *clipboard.Manager, log *slog.Logger, options ...Options) error {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -59,6 +68,32 @@ func Serve(ctx context.Context, socketPath string, clip *clipboard.Manager, log 
 	}
 
 	srv := &Server{socketPath: socketPath, clip: clip, log: log}
+	srv.idleTimeout = 15 * time.Minute
+	if len(options) > 0 {
+		if options[0].IdleTimeout > 0 {
+			srv.idleTimeout = options[0].IdleTimeout
+		}
+		srv.onLock = options[0].OnLock
+	}
+	stopIdle := make(chan struct{})
+	idleDone := make(chan struct{})
+	go func() {
+		defer close(idleDone)
+		interval := min(srv.idleTimeout/4, time.Second)
+		ticker := time.NewTicker(max(interval, time.Millisecond))
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopIdle:
+				return
+			case <-ticker.C:
+				srv.mu.Lock()
+				srv.expireLocked()
+				srv.mu.Unlock()
+			}
+		}
+	}()
+	defer func() { close(stopIdle); <-idleDone }()
 	defer srv.wipe()
 	defer os.Remove(socketPath)
 	if clip != nil {
@@ -121,21 +156,25 @@ func (s *Server) handle(conn net.Conn) {
 		_ = json.NewEncoder(conn).Encode(api.AgentResponse{Error: "invalid agent request"})
 		return
 	}
+	defer crypto.ZeroBytes(req.Key)
 
 	var resp api.AgentResponse
+	defer func() { crypto.ZeroBytes(resp.Key) }()
 	switch req.Op {
 	case api.AgentOpStatus:
 		s.mu.Lock()
+		s.expireLocked()
 		resp = api.AgentResponse{OK: true, Unlocked: len(s.key) > 0}
 		s.mu.Unlock()
 	case api.AgentOpUnlock:
-		if len(req.Key) == 0 {
-			resp = api.AgentResponse{Error: "master key cannot be empty"}
+		if len(req.Key) != 32 {
+			resp = api.AgentResponse{Error: "master key must be 32 bytes"}
 			break
 		}
 		s.mu.Lock()
 		crypto.ZeroBytes(s.key)
 		s.key = append([]byte(nil), req.Key...)
+		s.expires = time.Now().Add(s.idleTimeout)
 		s.mu.Unlock()
 		s.log.Info("session unlocked")
 		resp = api.AgentResponse{OK: true, Unlocked: true}
@@ -145,12 +184,14 @@ func (s *Server) handle(conn net.Conn) {
 		resp = api.AgentResponse{OK: true, Unlocked: false}
 	case api.AgentOpMasterKey:
 		s.mu.Lock()
+		s.expireLocked()
 		if len(s.key) == 0 {
 			s.mu.Unlock()
 			resp = api.AgentResponse{Error: ErrLocked.Error()}
 			break
 		}
 		resp = api.AgentResponse{OK: true, Unlocked: true, Key: append([]byte(nil), s.key...)}
+		s.expires = time.Now().Add(s.idleTimeout)
 		s.mu.Unlock()
 	case api.AgentOpCopy:
 		if s.clip == nil {
@@ -183,4 +224,31 @@ func (s *Server) wipe() {
 	defer s.mu.Unlock()
 	crypto.ZeroBytes(s.key)
 	s.key = nil
+	s.expires = time.Time{}
+	if s.clip != nil {
+		_ = s.clip.Clear()
+	}
+	if s.onLock != nil {
+		if err := s.onLock(); err != nil {
+			s.log.Error("clear keyring on lock", "error", err)
+		}
+	}
+}
+
+// Caller holds mu. Status probes do not extend the session deadline.
+func (s *Server) expireLocked() {
+	if len(s.key) > 0 && !time.Now().Before(s.expires) {
+		crypto.ZeroBytes(s.key)
+		s.key = nil
+		s.expires = time.Time{}
+		if s.clip != nil {
+			_ = s.clip.Clear()
+		}
+		if s.onLock != nil {
+			if err := s.onLock(); err != nil {
+				s.log.Error("clear keyring on auto-lock", "error", err)
+			}
+		}
+		s.log.Info("session automatically locked")
+	}
 }

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 
 	"github.com/osman/sylva/internal/api"
 	"github.com/osman/sylva/internal/config"
@@ -35,6 +36,9 @@ func (e *HTTPError) Unwrap() error {
 	switch e.Status {
 	case http.StatusConflict:
 		var body api.ErrorBody
+		if json.Unmarshal([]byte(e.Body), &body) == nil && body.Error == api.ErrorVaultChanged {
+			return storage.ErrVaultChanged
+		}
 		if json.Unmarshal([]byte(e.Body), &body) == nil && body.Error == api.ErrorRecordVersionConflict {
 			return storage.ErrVersionConflict
 		}
@@ -52,6 +56,8 @@ type Client struct {
 	apiPrefix    string
 	maxBodyBytes int64
 	httpClient   *http.Client
+	generation   atomic.Value
+	kdf          atomic.Pointer[config.CryptoConfig]
 }
 
 // NewClient constructs a new transport Client from the given ClientConfig.
@@ -173,6 +179,7 @@ func (c *Client) GetSalt(ctx context.Context) ([]byte, error) {
 	if err := c.doJSON(ctx, http.MethodGet, c.apiURL(api.PathVaultSalt), nil, http.StatusOK, &out); err != nil {
 		return nil, err
 	}
+	c.kdf.Store(out.KDF)
 	salt, err := parseSaltHex(out.SaltHex)
 	if err != nil {
 		return nil, err
@@ -201,6 +208,9 @@ func (c *Client) doJSON(ctx context.Context, method, reqURL string, in any, want
 		return fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Accept", api.ContentTypeJSON)
+	if generation, ok := c.generation.Load().(string); ok {
+		req.Header.Set(api.HeaderGeneration, generation)
+	}
 	if in != nil {
 		req.Header.Set("Content-Type", api.ContentTypeJSON)
 	}
@@ -236,3 +246,6 @@ func (c *Client) doJSON(ctx context.Context, method, reqURL string, in any, want
 	}
 	return nil
 }
+
+func (c *Client) SetGeneration(generation string) { c.generation.Store(generation) }
+func (c *Client) KDFConfig() *config.CryptoConfig { return c.kdf.Load() }

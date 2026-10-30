@@ -38,9 +38,13 @@ func (v *Vault) verifyKey(ctx context.Context, key []byte, allowInitialize bool)
 		return err
 	}
 	defer crypto.ZeroBytes(checkKey)
-	env, err := v.remote.GetKeyCheck(ctx)
+	state, err := v.remote.GetKeyCheckState(ctx)
 	if err == nil {
-		return verifyKeyCheck(checkKey, env)
+		if err := verifyKeyCheck(checkKey, &state.Envelope); err != nil {
+			return err
+		}
+		v.remote.SetGeneration(state.Generation)
+		return nil
 	}
 	if !errors.Is(err, storage.ErrNotFound) {
 		return fmt.Errorf("read vault key verifier: %w", err)
@@ -60,7 +64,7 @@ func (v *Vault) verifyKey(ctx context.Context, key []byte, allowInitialize bool)
 			return ErrInvalidPassphrase
 		}
 	}
-	env, err = crypto.Encrypt(checkKey, []byte(keyCheckPlaintext), []byte(keyCheckPurpose))
+	env, err := crypto.Encrypt(checkKey, []byte(keyCheckPlaintext), []byte(keyCheckPurpose))
 	if err != nil {
 		return err
 	}
@@ -69,11 +73,15 @@ func (v *Vault) verifyKey(ctx context.Context, key []byte, allowInitialize bool)
 			return fmt.Errorf("initialize vault key verifier: %w", err)
 		}
 		// A concurrent first unlock may have established a different key.
-		env, err = v.remote.GetKeyCheck(ctx)
+		state, err = v.remote.GetKeyCheckState(ctx)
 		if err != nil {
 			return fmt.Errorf("read initialized vault key verifier: %w", err)
 		}
-		return verifyKeyCheck(checkKey, env)
+		if err := verifyKeyCheck(checkKey, &state.Envelope); err != nil {
+			return err
+		}
+		v.remote.SetGeneration(state.Generation)
+		return nil
 	}
 	return nil
 }
