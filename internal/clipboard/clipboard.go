@@ -21,6 +21,8 @@ const (
 	BackendFile = "file"
 )
 
+var ErrClosed = errors.New("clipboard manager is closed")
+
 // Backend is a clipboard storage target.
 type Backend interface {
 	Write(text string) error
@@ -34,11 +36,15 @@ type Manager struct {
 	backend Backend
 	after   time.Duration
 
-	mu      sync.Mutex
-	gen     uint64
-	done    chan struct{}
-	stop    chan struct{}
-	cleared func()
+	mu        sync.Mutex
+	gen       uint64
+	done      chan struct{}
+	stop      chan struct{}
+	cleared   func()
+	closed    bool
+	workers   sync.WaitGroup
+	closeOnce sync.Once
+	closeErr  error
 }
 
 // NewManager constructs a clipboard manager for the configured backend.
@@ -76,10 +82,15 @@ func newBackend(backend, filePath string) (Backend, error) {
 
 // Copy writes text and schedules a clear after the configured duration.
 func (m *Manager) Copy(text string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return ErrClosed
+	}
 	if err := m.backend.Write(text); err != nil {
 		return err
 	}
-	m.schedule(text)
+	m.scheduleLocked(text)
 	return nil
 }
 
@@ -91,6 +102,14 @@ func (m *Manager) ScheduleClear(text string) {
 
 func (m *Manager) schedule(text string) {
 	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return
+	}
+	m.scheduleLocked(text)
+}
+
+func (m *Manager) scheduleLocked(text string) {
 	m.gen++
 	gen := m.gen
 	done := make(chan struct{})
@@ -101,9 +120,10 @@ func (m *Manager) schedule(text string) {
 	stop := make(chan struct{})
 	m.stop = stop
 	after := m.after
-	m.mu.Unlock()
+	m.workers.Add(1)
 
 	go func() {
+		defer m.workers.Done()
 		timer := time.NewTimer(after)
 		defer timer.Stop()
 		defer close(done)
@@ -118,7 +138,7 @@ func (m *Manager) schedule(text string) {
 func (m *Manager) clearIfUnchanged(gen uint64, original string) {
 	m.mu.Lock()
 	fn := m.cleared
-	if m.gen != gen {
+	if m.closed || m.gen != gen {
 		m.mu.Unlock()
 		return
 	}
@@ -135,6 +155,7 @@ func (m *Manager) clearIfUnchanged(gen uint64, original string) {
 }
 
 // NotifyCleared registers a callback invoked after an automatic clipboard clear.
+// The callback must return and must not call Close or Wait on this manager.
 func (m *Manager) NotifyCleared(fn func()) {
 	m.mu.Lock()
 	m.cleared = fn
@@ -143,18 +164,26 @@ func (m *Manager) NotifyCleared(fn func()) {
 
 // Read returns the current clipboard contents.
 func (m *Manager) Read() (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return "", ErrClosed
+	}
 	return m.backend.Read()
 }
 
 // Clear wipes the clipboard immediately.
 func (m *Manager) Clear() error {
 	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return ErrClosed
+	}
 	m.gen++
 	if m.stop != nil {
 		close(m.stop)
 		m.stop = nil
 	}
-	m.mu.Unlock()
 	return m.backend.Clear()
 }
 
@@ -173,16 +202,22 @@ func (m *Manager) ClearAfter() time.Duration {
 	return m.after
 }
 
-// Close releases OS clipboard ownership and backend resources.
+// Close prevents new copies, joins clear workers/callbacks, and releases the
+// backend. Repeated calls return the same result.
 func (m *Manager) Close() error {
-	m.mu.Lock()
-	m.gen++
-	if m.stop != nil {
-		close(m.stop)
-		m.stop = nil
-	}
-	m.mu.Unlock()
-	return m.backend.Close()
+	m.closeOnce.Do(func() {
+		m.mu.Lock()
+		m.closed = true
+		m.gen++
+		if m.stop != nil {
+			close(m.stop)
+			m.stop = nil
+		}
+		m.mu.Unlock()
+		m.workers.Wait()
+		m.closeErr = m.backend.Close()
+	})
+	return m.closeErr
 }
 
 // HoldsUntilClear reports whether this process must stay alive to keep the

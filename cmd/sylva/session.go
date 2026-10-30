@@ -27,7 +27,7 @@ func openUnlocked(cfg config.ClientConfig) (*sylva.Vault, error) {
 	}
 
 	if cfg.AgentEnabled {
-		if ac, err := agent.Dial(cfg.AgentSocketPath, cfg.Timeout); err == nil {
+		if ac, err := agent.DialWithLimit(cfg.AgentSocketPath, cfg.Timeout, cfg.AgentMaxRequestBytes); err == nil {
 			key, keyErr := ac.MasterKey()
 			if keyErr == nil {
 				ctx, cancel := context.WithTimeout(context.Background(), cfg.Timeout)
@@ -152,7 +152,7 @@ func runLock(cfg config.ClientConfig) error {
 		}
 	}
 	if cfg.AgentEnabled {
-		ac, err := agent.Dial(cfg.AgentSocketPath, cfg.Timeout)
+		ac, err := agent.DialWithLimit(cfg.AgentSocketPath, cfg.Timeout, cfg.AgentMaxRequestBytes)
 		if err == nil {
 			if err := ac.Lock(); err != nil {
 				return err
@@ -175,10 +175,12 @@ func runAgent(cfg config.ClientConfig) error {
 		return err
 	}
 
+	defer clip.Close()
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	err = agent.Serve(ctx, cfg.AgentSocketPath, clip, log, agent.Options{IdleTimeout: cfg.AgentIdleTimeout, OnLock: func() error {
+	err = agent.Serve(ctx, cfg.AgentSocketPath, clip, log, agent.Options{IdleTimeout: cfg.AgentIdleTimeout, RequestTimeout: cfg.AgentRequestTimeout, MaxRequestBytes: cfg.AgentMaxRequestBytes, MaxConnections: cfg.AgentMaxConnections, OnLock: func() error {
 		return agent.NewKeyring(cfg.KeyringEnabled, cfg.KeyringService, cfg.KeyringUser).Delete()
 	}})
 	if err != nil {
@@ -242,7 +244,7 @@ func copyToClipboard(cfg config.ClientConfig, secretType, identifier, secret str
 }
 
 func ensureAgent(cfg config.ClientConfig) (*agent.Client, error) {
-	if ac, err := agent.Dial(cfg.AgentSocketPath, cfg.Timeout); err == nil {
+	if ac, err := agent.DialWithLimit(cfg.AgentSocketPath, cfg.Timeout, cfg.AgentMaxRequestBytes); err == nil {
 		return ac, nil
 	}
 	if err := startDetachedAgent(cfg); err != nil {
@@ -251,7 +253,7 @@ func ensureAgent(cfg config.ClientConfig) (*agent.Client, error) {
 	deadline := time.Now().Add(cfg.Timeout)
 	var last error
 	for time.Now().Before(deadline) {
-		ac, err := agent.Dial(cfg.AgentSocketPath, 50*time.Millisecond)
+		ac, err := agent.DialWithLimit(cfg.AgentSocketPath, 50*time.Millisecond, cfg.AgentMaxRequestBytes)
 		if err == nil {
 			return ac, nil
 		}

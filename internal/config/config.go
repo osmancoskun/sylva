@@ -75,6 +75,9 @@ type ClientConfig struct {
 	ClipboardFile        string
 	AgentEnabled         bool
 	AgentIdleTimeout     time.Duration
+	AgentRequestTimeout  time.Duration
+	AgentMaxRequestBytes int64
+	AgentMaxConnections  int
 	AgentSocketPath      string
 	AgentLogPath         string
 	LogLevel             slog.Level
@@ -315,6 +318,21 @@ func LoadClientConfig(envPath string) (ClientConfig, error) {
 	if err != nil || agentIdleTimeout <= 0 {
 		return ClientConfig{}, fmt.Errorf("agent_idle_timeout must be a positive duration")
 	}
+	agentRequestTimeout, err := s.durationVal("agent_request_timeout")
+	if err != nil || agentRequestTimeout <= 0 {
+		return ClientConfig{}, fmt.Errorf("agent_request_timeout must be a positive duration")
+	}
+	agentMaxRequestBytes, err := s.int64Val("agent_max_request_bytes")
+	if err != nil {
+		return ClientConfig{}, err
+	}
+	if err := limits.Validate("agent_max_request_bytes", agentMaxRequestBytes); err != nil {
+		return ClientConfig{}, err
+	}
+	agentMaxConnections, err := s.intVal("agent_max_connections")
+	if err != nil || agentMaxConnections <= 0 {
+		return ClientConfig{}, fmt.Errorf("agent_max_connections must be positive")
+	}
 	logLevel, err := parseLogLevel(s.get("log_level"))
 	if err != nil {
 		return ClientConfig{}, err
@@ -368,6 +386,9 @@ func LoadClientConfig(envPath string) (ClientConfig, error) {
 		ClipboardFile:        s.get("clipboard_file"),
 		AgentEnabled:         agentEnabled,
 		AgentIdleTimeout:     agentIdleTimeout,
+		AgentRequestTimeout:  agentRequestTimeout,
+		AgentMaxRequestBytes: agentMaxRequestBytes,
+		AgentMaxConnections:  agentMaxConnections,
 		AgentSocketPath:      s.get("agent_socket_path"),
 		AgentLogPath:         s.get("agent_log_path"),
 		LogLevel:             logLevel,

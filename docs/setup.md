@@ -81,6 +81,35 @@ Existing vaults without a verifier are upgraded automatically only after every s
 
 Passphrase unlock and session-agent key reuse both require the server's verifier; cached records are never used to bypass verification. If the server cannot be reached, unlocking fails. Noninteractive scripts must explicitly supply `SYLVA_MASTER_PASSPHRASE`.
 
+### Agent lifecycle and limits
+
+The agent holds a per-socket file lock (`agent_socket_path` plus `.lock`) for its
+whole lifetime. Concurrent starts leave the existing session untouched. A dead
+agent's stale socket is recovered on restart; regular files and symlinks at the
+socket path are not replaced. Socket and lock files have mode `0600`. The lock
+file remains after shutdown so future starts synchronize on the same inode;
+do not delete it while an agent is running. Keep the socket/lock on a local
+filesystem with working advisory file locks.
+
+Override these defaults in `.sylva/config` or process environment:
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `agent_request_timeout` | `5s` | Deadline for reading and replying to one request |
+| `agent_max_request_bytes` | `1048576` | Encoded JSON frame limit, including its terminating newline |
+| `agent_max_connections` | `64` | Maximum simultaneous accepted requests |
+
+The CLI applies the same frame limit to requests and replies. Each connection
+uses one newline-terminated JSON request and response; existing `json.Encoder`
+clients already send this terminator. Partial requests time out; oversized or
+malformed frames are rejected before changing the session. Connections above
+the limit are closed immediately. These settings must be positive and are
+independent of `agent_idle_timeout`, which still controls automatic key expiry.
+
+On shutdown the agent closes active connections, waits for request and idle
+workers, wipes the key/clipboard, and joins pending clipboard clear callbacks
+before releasing its lock. Clipboard managers reject copies after closing.
+
 ## Secrets
 
 ```bash

@@ -1,22 +1,33 @@
 package agent
 
 import (
-	"encoding/json"
 	"fmt"
 	"net"
 	"time"
 
 	"github.com/osman/sylva/internal/api"
+	"github.com/osman/sylva/internal/crypto"
+	"github.com/osman/sylva/internal/limits"
 )
 
 // Client talks to a running local session agent over a unix socket.
 type Client struct {
-	socketPath string
-	timeout    time.Duration
+	socketPath      string
+	timeout         time.Duration
+	maxRequestBytes int64
 }
 
 // Dial probes the agent socket and returns a client if it is reachable.
 func Dial(socketPath string, timeout time.Duration) (*Client, error) {
+	return DialWithLimit(socketPath, timeout, DefaultMaxRequestBytes)
+}
+
+// DialWithLimit uses the configured frame limit for both requests and replies.
+func DialWithLimit(socketPath string, timeout time.Duration, maxBytes int64) (*Client, error) {
+	maxBytes = limits.OrDefault(maxBytes, DefaultMaxRequestBytes)
+	if err := limits.Validate("agent_max_request_bytes", maxBytes); err != nil {
+		return nil, err
+	}
 	if timeout <= 0 {
 		return nil, fmt.Errorf("agent dial timeout must be positive")
 	}
@@ -25,7 +36,7 @@ func Dial(socketPath string, timeout time.Duration) (*Client, error) {
 		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
 	_ = conn.Close()
-	return &Client{socketPath: socketPath, timeout: timeout}, nil
+	return &Client{socketPath: socketPath, timeout: timeout, maxRequestBytes: maxBytes}, nil
 }
 
 // Status reports whether the agent currently holds a master key.
@@ -88,11 +99,12 @@ func (c *Client) roundTrip(req api.AgentRequest) (api.AgentResponse, error) {
 	if err := conn.SetDeadline(time.Now().Add(c.timeout)); err != nil {
 		return api.AgentResponse{}, err
 	}
-	if err := json.NewEncoder(conn).Encode(req); err != nil {
+	if err := writeFrame(conn, c.maxRequestBytes, req); err != nil {
 		return api.AgentResponse{}, fmt.Errorf("write agent request: %w", err)
 	}
 	var resp api.AgentResponse
-	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
+	if err := readFrame(conn, c.maxRequestBytes, &resp); err != nil {
+		crypto.ZeroBytes(resp.Key)
 		return api.AgentResponse{}, fmt.Errorf("read agent response: %w", err)
 	}
 	if !resp.OK {

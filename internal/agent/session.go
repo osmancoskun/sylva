@@ -7,17 +7,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/osman/sylva/internal/api"
 	"github.com/osman/sylva/internal/clipboard"
 	"github.com/osman/sylva/internal/crypto"
+	"github.com/osman/sylva/internal/limits"
 )
 
 var (
@@ -26,6 +24,9 @@ var (
 
 	// ErrLocked indicates the agent is running but has no master key.
 	ErrLocked = errors.New("session agent is locked")
+
+	// ErrAlreadyRunning leaves the active agent and its unlocked key untouched.
+	ErrAlreadyRunning = errors.New("session agent is already running")
 )
 
 // Server holds an unlocked master key in memory and serves local CLI clients.
@@ -34,47 +35,77 @@ type Server struct {
 	clip       *clipboard.Manager
 	log        *slog.Logger
 
-	mu             sync.Mutex
-	key            []byte
-	copyType       string
-	copyIdentifier string
-	idleTimeout    time.Duration
-	expires        time.Time
-	onLock         func() error
+	mu              sync.Mutex
+	key             []byte
+	copyType        string
+	copyIdentifier  string
+	idleTimeout     time.Duration
+	expires         time.Time
+	onLock          func() error
+	requestTimeout  time.Duration
+	maxRequestBytes int64
 }
+
+const (
+	DefaultRequestTimeout        = 5 * time.Second
+	DefaultMaxRequestBytes int64 = 1 << 20
+	DefaultMaxConnections        = 64
+)
 
 type Options struct {
 	IdleTimeout time.Duration
-	OnLock      func() error
+	// OnLock must return promptly; shutdown waits for callbacks and workers.
+	OnLock          func() error
+	RequestTimeout  time.Duration
+	MaxRequestBytes int64
+	MaxConnections  int
+}
+
+func normalizeOptions(o Options) (Options, error) {
+	if o.IdleTimeout == 0 {
+		o.IdleTimeout = 15 * time.Minute
+	}
+	if o.RequestTimeout == 0 {
+		o.RequestTimeout = DefaultRequestTimeout
+	}
+	if o.MaxRequestBytes == 0 {
+		o.MaxRequestBytes = DefaultMaxRequestBytes
+	}
+	if o.MaxConnections == 0 {
+		o.MaxConnections = DefaultMaxConnections
+	}
+	if o.IdleTimeout < 0 || o.RequestTimeout < 0 || o.MaxConnections < 1 {
+		return o, errors.New("agent timeouts and connection limit must be positive")
+	}
+	if err := limits.Validate("agent_max_request_bytes", o.MaxRequestBytes); err != nil {
+		return o, err
+	}
+	return o, nil
 }
 
 // Serve listens on the configured unix socket until ctx is cancelled.
-func Serve(ctx context.Context, socketPath string, clip *clipboard.Manager, log *slog.Logger, options ...Options) error {
+func Serve(ctx context.Context, socketPath string, clip *clipboard.Manager, log *slog.Logger, options ...Options) (retErr error) {
 	if log == nil {
 		log = slog.Default()
 	}
-	if err := os.MkdirAll(filepath.Dir(socketPath), 0o700); err != nil {
-		return fmt.Errorf("create agent socket directory: %w", err)
-	}
-	_ = os.Remove(socketPath)
-
-	ln, err := net.Listen("unix", socketPath)
-	if err != nil {
-		return fmt.Errorf("listen on agent socket: %w", err)
-	}
-	if err := os.Chmod(socketPath, 0o600); err != nil {
-		_ = ln.Close()
-		return fmt.Errorf("chmod agent socket: %w", err)
-	}
-
-	srv := &Server{socketPath: socketPath, clip: clip, log: log}
-	srv.idleTimeout = 15 * time.Minute
+	var opt Options
 	if len(options) > 0 {
-		if options[0].IdleTimeout > 0 {
-			srv.idleTimeout = options[0].IdleTimeout
-		}
-		srv.onLock = options[0].OnLock
+		opt = options[0]
 	}
+	opt, err := normalizeOptions(opt)
+	if err != nil {
+		return err
+	}
+	ln, release, err := listenAgent(socketPath)
+	if err != nil {
+		return err
+	}
+	defer func() { retErr = errors.Join(retErr, release()) }()
+	if clip != nil {
+		defer clip.Close()
+	}
+	srv := &Server{socketPath: socketPath, clip: clip, log: log, idleTimeout: opt.IdleTimeout, onLock: opt.OnLock, requestTimeout: opt.RequestTimeout, maxRequestBytes: opt.MaxRequestBytes}
+	defer srv.wipe()
 	stopIdle := make(chan struct{})
 	idleDone := make(chan struct{})
 	go func() {
@@ -94,20 +125,30 @@ func Serve(ctx context.Context, socketPath string, clip *clipboard.Manager, log 
 		}
 	}()
 	defer func() { close(stopIdle); <-idleDone }()
-	defer srv.wipe()
-	defer os.Remove(socketPath)
 	if clip != nil {
 		clip.NotifyCleared(func() {
 			log.Info("clipboard cleared", srv.copiedTarget()...)
 		})
-		defer clip.Close()
 	}
 	log.Info("session agent listening", slog.String("socket", socketPath))
 
+	ctx, cancel := context.WithCancel(ctx)
+	var workers sync.WaitGroup
+	var activeMu sync.Mutex
+	active := make(map[net.Conn]struct{})
+	slots := make(chan struct{}, opt.MaxConnections)
+	shutdownDone := make(chan struct{})
 	go func() {
+		defer close(shutdownDone)
 		<-ctx.Done()
 		_ = ln.Close()
+		activeMu.Lock()
+		for conn := range active {
+			_ = conn.Close()
+		}
+		activeMu.Unlock()
 	}()
+	defer func() { cancel(); <-shutdownDone; workers.Wait() }()
 
 	for {
 		conn, err := ln.Accept()
@@ -120,7 +161,27 @@ func Serve(ctx context.Context, socketPath string, clip *clipboard.Manager, log 
 			}
 			return err
 		}
-		go srv.handle(conn)
+		select {
+		case slots <- struct{}{}:
+		default:
+			_ = conn.Close()
+			continue
+		}
+		activeMu.Lock()
+		if ctx.Err() != nil {
+			activeMu.Unlock()
+			<-slots
+			_ = conn.Close()
+			return nil
+		}
+		active[conn] = struct{}{}
+		workers.Add(1)
+		activeMu.Unlock()
+		go func() {
+			defer workers.Done()
+			defer func() { activeMu.Lock(); delete(active, conn); activeMu.Unlock(); <-slots }()
+			srv.handle(conn)
+		}()
 	}
 }
 
@@ -151,12 +212,19 @@ func clipboardTargetAttrs(secretType, identifier string) []any {
 func (s *Server) handle(conn net.Conn) {
 	defer conn.Close()
 
-	var req api.AgentRequest
-	if err := json.NewDecoder(conn).Decode(&req); err != nil {
-		_ = json.NewEncoder(conn).Encode(api.AgentResponse{Error: "invalid agent request"})
+	if err := conn.SetDeadline(time.Now().Add(s.requestTimeout)); err != nil {
 		return
 	}
-	defer crypto.ZeroBytes(req.Key)
+	var req api.AgentRequest
+	defer func() { crypto.ZeroBytes(req.Key) }()
+	if err := readFrame(conn, s.maxRequestBytes, &req); err != nil {
+		message := "invalid agent request"
+		if errors.Is(err, limits.ErrExceeded) {
+			message = err.Error()
+		}
+		_ = json.NewEncoder(conn).Encode(api.AgentResponse{Error: message})
+		return
+	}
 
 	var resp api.AgentResponse
 	defer func() { crypto.ZeroBytes(resp.Key) }()
@@ -213,7 +281,7 @@ func (s *Server) handle(conn net.Conn) {
 		s.clip.ScheduleClear(req.Secret)
 		resp = api.AgentResponse{OK: true}
 	default:
-		resp = api.AgentResponse{Error: fmt.Sprintf("unknown agent op %q", req.Op)}
+		resp = api.AgentResponse{Error: "unknown agent operation"}
 	}
 
 	_ = json.NewEncoder(conn).Encode(resp)
