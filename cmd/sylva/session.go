@@ -211,6 +211,7 @@ func runAgent(cfg config.ClientConfig) error {
 
 	clip, err := clipboard.NewManager(cfg.ClipboardBackend, cfg.ClipboardFile, cfg.ClipboardClearAfter)
 	if err != nil {
+		log.Error("initialize agent clipboard", slog.Any("error", err))
 		return err
 	}
 
@@ -299,6 +300,9 @@ func ensureAgent(cfg config.ClientConfig) (*agent.Client, error) {
 	}
 	if last == nil {
 		last = agent.ErrUnavailable
+	}
+	if path := strings.TrimSpace(cfg.AgentLogPath); path != "" {
+		return nil, fmt.Errorf("session agent did not become ready; see %s: %w", path, last)
 	}
 	return nil, last
 }

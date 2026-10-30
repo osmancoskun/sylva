@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	// BackendAuto uses the OS clipboard when available and otherwise memory.
+	// BackendAuto selects an available OS clipboard, returning an error if none is available.
 	BackendAuto = "auto"
 	// BackendOS talks to the compositor clipboard over X11 or Wayland sockets.
 	BackendOS = "os"
@@ -70,13 +70,8 @@ func newBackend(backend, filePath string) (Backend, error) {
 			return nil, errors.New("clipboard file backend requires SYLVA_CLIPBOARD_FILE")
 		}
 		return newFile(filePath)
-	case BackendOS:
+	case BackendOS, BackendAuto:
 		return newOS()
-	case BackendAuto:
-		if b, err := newOS(); err == nil {
-			return b, nil
-		}
-		return newMemory(), nil
 	default:
 		return nil, fmt.Errorf("unknown clipboard backend %q (expected auto, os, memory, file)", backend)
 	}

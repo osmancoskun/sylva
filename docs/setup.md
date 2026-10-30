@@ -167,6 +167,15 @@ Updates carry the version that was read before editing. The server atomically ac
 
 Clipboard backends: `auto` (X11 or Wayland), `os`, `memory`, `file`. `auto`/`os` need the agent. Docker smoke uses `memory`.
 
+`auto` and `os` fail when the desktop clipboard is unavailable; they never
+silently store a secret in process memory. Wayland requires the
+`wlr-data-control` protocol; if unavailable, an accessible X11 display can be
+used instead. Connection/protocol errors are retained in the error message.
+For a detached agent startup failure, check `agent_log_path` for the clipboard
+error. Restart existing agents after upgrading so they use this behavior.
+`memory` and `file` remain explicit test/headless backends; they do not update
+the desktop clipboard.
+
 ## Large vaults and transfer limits
 
 The limits apply to encoded JSON/file bytes, including base64 and metadata,
