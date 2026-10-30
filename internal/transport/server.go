@@ -26,12 +26,13 @@ type StatusResponse = api.StatusResponse
 
 // Server wraps the HTTP server and routing for the sylvad daemon.
 type Server struct {
-	cfg        config.ServerConfig
-	store      storage.Store
-	httpServer *http.Server
-	logger     *slog.Logger
-	startedAt  time.Time
-	tsClose    func() error
+	cfg            config.ServerConfig
+	store          storage.Store
+	httpServer     *http.Server
+	logger         *slog.Logger
+	startedAt      time.Time
+	tsClose        func() error
+	tailnetDNSName func(context.Context) (string, error)
 }
 
 // NewServer creates and configures a new transport Server instance.
@@ -103,6 +104,11 @@ func (s *Server) Start(ctx context.Context) error {
 		ln, s.tsClose, err = openTailscaleListener(ctx, s.cfg, s.logger)
 		if err != nil {
 			return err
+		}
+		if identity, ok := ln.(interface {
+			TailscaleDNSName(context.Context) (string, error)
+		}); ok {
+			s.tailnetDNSName = identity.TailscaleDNSName
 		}
 		// Same-host CLI traffic to the tsnet IP hairpins through kernel
 		// tailscale0 and usually times out. Also bind loopback for local sylva.
@@ -197,7 +203,7 @@ func (s *Server) serve(ctx context.Context, ln net.Listener, tailnet bool) error
 	}
 }
 
-func (s *Server) handlePing(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
 	resp := api.StatusResponse{
 		Status:    "ok",
 		Service:   s.cfg.ServiceName,
@@ -205,6 +211,16 @@ func (s *Server) handlePing(w http.ResponseWriter, _ *http.Request) {
 		MTLS:      s.cfg.EnableMTLS,
 		Tailscale: s.cfg.EnableTailscale,
 		Timestamp: time.Now().UTC(),
+	}
+	if s.tailnetDNSName != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		name, err := s.tailnetDNSName(ctx)
+		cancel()
+		if err != nil {
+			s.logger.Warn("tailscale identity unavailable", slog.Any("error", err))
+		} else {
+			resp.TailscaleDNSName = name
+		}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

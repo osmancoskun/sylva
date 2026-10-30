@@ -31,6 +31,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  backup <file>        Write an encrypted vault backup\n")
 		fmt.Fprintf(os.Stderr, "  restore <file>       Restore into an uninitialized vault\n")
 		fmt.Fprintf(os.Stderr, "  agent                Run the local session agent (foreground)\n")
+		fmt.Fprintf(os.Stderr, "  cert init [--add-tailscale] [--host DNS-or-IP]\n")
+		fmt.Fprintf(os.Stderr, "                       Create local CA and mTLS certificate pairs\n")
+		fmt.Fprintf(os.Stderr, "  cert add-tailscale   Add the joined node name to an existing server certificate\n")
 		fmt.Fprintf(os.Stderr, "  set [<id> [<password>] [<type>]]\n")
 		fmt.Fprintf(os.Stderr, "                       Store a secret (interactive if args are omitted)\n")
 		fmt.Fprintf(os.Stderr, "  get <id> [<type>]    Copy a secret to the clipboard\n")
@@ -54,6 +57,13 @@ func main() {
 	}
 	if cmd == "enable" || cmd == "disable" {
 		if err := runFeatureToggle(cmd == "enable", args[1:]); err != nil {
+			fatal(err)
+		}
+		return
+	}
+	// Certificate bootstrap must work before mTLS configuration can be loaded.
+	if cmd == "cert" {
+		if err := runCert(*envFile, args[1:]); err != nil {
 			fatal(err)
 		}
 		return
@@ -170,6 +180,9 @@ func runPing(cfg config.ClientConfig) error {
 	fmt.Printf("  Version:   %s\n", status.Version)
 	fmt.Printf("  mTLS:      %t\n", status.MTLS)
 	fmt.Printf("  Tailscale: %t\n", status.Tailscale)
+	if status.TailscaleDNSName != "" {
+		fmt.Printf("  Tailnet DNS: %s\n", status.TailscaleDNSName)
+	}
 	fmt.Printf("  Latency:   %s\n", rtt)
 	return nil
 }
@@ -238,7 +251,7 @@ func runFeatureToggle(enable bool, args []string) error {
 			}
 		}
 		if len(missing) > 0 {
-			return fmt.Errorf("mTLS certs missing (%s); create them first, see docs/mtls.md", strings.Join(missing, ", "))
+			return fmt.Errorf("mTLS certs missing (%s); run sylva cert init first, see docs/mtls.md", strings.Join(missing, ", "))
 		}
 	}
 	if enable && feature == "tailscale" {

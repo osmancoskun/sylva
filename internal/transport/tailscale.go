@@ -9,8 +9,27 @@ import (
 	"strings"
 
 	"github.com/osman/sylva/internal/config"
+	"tailscale.com/ipn/ipnstate"
 	"tailscale.com/tsnet"
 )
+
+type tailscaleListener struct {
+	net.Listener
+	status func(context.Context) (*ipnstate.Status, error)
+}
+
+// TailscaleDNSName reads the identity of this embedded node, not the host's
+// tailscaled. Fetch on demand so account/name changes do not use a stale name.
+func (l *tailscaleListener) TailscaleDNSName(ctx context.Context) (string, error) {
+	status, err := l.status(ctx)
+	if err != nil {
+		return "", err
+	}
+	if status == nil || status.BackendState != "Running" || status.Self == nil {
+		return "", nil
+	}
+	return strings.TrimSuffix(strings.TrimSpace(status.Self.DNSName), "."), nil
+}
 
 // openTailscaleListener joins a tailnet and returns a listener plus a closer
 // for the embedded node. Tests replace this to avoid a live Tailscale control plane.
@@ -63,6 +82,12 @@ func listenOnTailnet(ctx context.Context, cfg config.ServerConfig, logger *slog.
 		_ = ts.Close()
 		return nil, nil, fmt.Errorf("tailscale listen :%s: %w", cfg.Port, err)
 	}
+	lc, err := ts.LocalClient()
+	if err != nil {
+		_ = ln.Close()
+		_ = ts.Close()
+		return nil, nil, fmt.Errorf("tailscale local status client: %w", err)
+	}
 
 	if status != nil {
 		logger.Info("joined tailnet",
@@ -70,5 +95,5 @@ func listenOnTailnet(ctx context.Context, cfg config.ServerConfig, logger *slog.
 			slog.Any("tailscale_ips", status.TailscaleIPs),
 		)
 	}
-	return ln, ts.Close, nil
+	return &tailscaleListener{Listener: ln, status: lc.Status}, ts.Close, nil
 }

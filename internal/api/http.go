@@ -110,12 +110,13 @@ func RecordsQuery(key, value string) string {
 
 // StatusResponse is returned by ping and healthz.
 type StatusResponse struct {
-	Status    string    `json:"status"`
-	Service   string    `json:"service"`
-	Version   string    `json:"version"`
-	MTLS      bool      `json:"mtls_enabled"`
-	Tailscale bool      `json:"tailscale_enabled"`
-	Timestamp time.Time `json:"timestamp"`
+	TailscaleDNSName string    `json:"tailscale_dns_name,omitempty"`
+	Status           string    `json:"status"`
+	Service          string    `json:"service"`
+	Version          string    `json:"version"`
+	MTLS             bool      `json:"mtls_enabled"`
+	Tailscale        bool      `json:"tailscale_enabled"`
+	Timestamp        time.Time `json:"timestamp"`
 }
 
 // Stable error strings returned in ErrorBody.Error.

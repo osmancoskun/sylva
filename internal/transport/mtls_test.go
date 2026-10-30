@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"fmt"
 	"io"
 	"log/slog"
 	"math/big"
@@ -107,6 +108,15 @@ func TestNewClientMTLSRequiresCerts(t *testing.T) {
 }
 
 func TestStartListensOnTailscale(t *testing.T) {
+	for _, mtls := range []bool{false, true} {
+		t.Run(fmt.Sprintf("mtls=%v", mtls), func(t *testing.T) {
+			testStartListensOnTailscale(t, mtls)
+		})
+	}
+}
+
+func testStartListensOnTailscale(t *testing.T, mtls bool) {
+	t.Helper()
 	config.IsolateProcessEnv(t)
 	envPath := filepath.Join("..", "..", ".env.example")
 	srvCfg, err := config.LoadServerConfig(envPath)
@@ -114,6 +124,11 @@ func TestStartListensOnTailscale(t *testing.T) {
 		t.Fatalf("load server config: %v", err)
 	}
 	srvCfg.EnableTailscale = true
+	bundle := writeMTLSBundle(t, t.TempDir(), "sylva")
+	srvCfg.EnableMTLS = mtls
+	srvCfg.CACertPath = bundle.ca
+	srvCfg.ServerCertPath = bundle.serverCert
+	srvCfg.ServerKeyPath = bundle.serverKey
 	srvCfg.DBPath = filepath.Join(t.TempDir(), "sylvad.db")
 	store, err := storage.OpenSQLite(srvCfg.DBPath, srvCfg.SQLiteBusyTimeout)
 	if err != nil {
@@ -127,7 +142,7 @@ func TestStartListensOnTailscale(t *testing.T) {
 	}
 	closed := false
 	restore := transport.SetTailscaleListenerForTest(func(context.Context, config.ServerConfig, *slog.Logger) (net.Listener, func() error, error) {
-		return ln, func() error {
+		return &namedTailnetListener{Listener: ln}, func() error {
 			closed = true
 			return nil
 		}, nil
@@ -141,12 +156,28 @@ func TestStartListensOnTailscale(t *testing.T) {
 	go func() {
 		errCh <- srv.Start(ctx)
 	}()
+	t.Cleanup(func() {
+		cancel()
+		if err := <-errCh; err != nil {
+			t.Errorf("start: %v", err)
+		}
+		if !closed {
+			t.Error("expected tailscale closer to run")
+		}
+	})
 
 	clientCfg, err := config.LoadClientConfig(envPath)
 	if err != nil {
 		t.Fatalf("load client config: %v", err)
 	}
 	clientCfg.ServerURL = "http://" + ln.Addr().String()
+	if mtls {
+		clientCfg.EnableMTLS = true
+		clientCfg.CACertPath = bundle.ca
+		clientCfg.ClientCertPath = bundle.clientCert
+		clientCfg.ClientKeyPath = bundle.clientKey
+		clientCfg.ServerURL = "https://" + ln.Addr().String()
+	}
 	client, err := transport.NewClient(clientCfg)
 	if err != nil {
 		t.Fatalf("new client: %v", err)
@@ -171,13 +202,20 @@ func TestStartListensOnTailscale(t *testing.T) {
 	if !status.Tailscale {
 		t.Fatal("expected ping to report tailscale_enabled")
 	}
-	cancel()
-	if err := <-errCh; err != nil {
-		t.Fatalf("start: %v", err)
+	if status.MTLS != mtls {
+		t.Fatalf("ping mTLS=%v, want %v", status.MTLS, mtls)
 	}
-	if !closed {
-		t.Fatal("expected tailscale closer to run")
+	if status.TailscaleDNSName != "actual-node-2.tail-example.ts.net" {
+		t.Fatalf("missing embedded node identity in ping: %q", status.TailscaleDNSName)
 	}
+}
+
+type namedTailnetListener struct {
+	net.Listener
+}
+
+func (l *namedTailnetListener) TailscaleDNSName(context.Context) (string, error) {
+	return "actual-node-2.tail-example.ts.net", nil
 }
 
 func startMTLSServer(t *testing.T) (config.ServerConfig, config.ClientConfig) {
