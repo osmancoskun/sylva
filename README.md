@@ -20,13 +20,40 @@ Logins sit in a domain tree. `mail.company.com` can inherit `company.com` instea
 
 `sylvad` is the HTTP server and SQLite store. `sylva` is the CLI and exits when the command finishes. `sylva agent` keeps the session key and clipboard after that. `get` starts the agent if it is not running.
 
-Setup: [docs/setup.md](docs/setup.md). Optional TLS 1.3 mTLS: [docs/mtls.md](docs/mtls.md). Optional Tailscale: [docs/tailscale.md](docs/tailscale.md).
+Start with [setup](docs/setup.md), then use the [command and recovery how-to](docs/howto.md).
+Remote access: [TLS 1.3 mTLS](docs/mtls.md) or [Tailscale](docs/tailscale.md).
+Development checks and PR settings: [CI guide](docs/ci.md).
 
 Plain HTTP is restricted to loopback. Remote access requires mTLS or the
 embedded Tailscale listener with a restrictive tailnet policy. Docker Compose
 requires mTLS certificates and publishes only to localhost by default.
 
+The passphrase protects decryption; it is not API authorization. Callers with
+access to the daemon API can mutate or delete the vault's ciphertext. Loopback
+HTTP assumes local callers are trusted; accepted client certificates and
+tailnet access policies grant access to the whole vault.
+
+For a new mTLS setup, run `sylva cert init` to generate the certificates, then
+`sylva enable mtls` and restart the daemon. Add `--host <DNS-or-IP>` to
+`cert init` for a remote address. The [mTLS guide](docs/mtls.md) covers file
+placement and Docker; certificate generation does not need OpenSSL.
+For [Tailscale + mTLS](docs/tailscale.md#with-mtls), let the Tailscale-enabled
+daemon join first, then use `cert init --add-tailscale` to include its full
+MagicDNS name automatically before enabling mTLS and restarting.
+For an existing bundle, `sylva cert add-tailscale` reissues only the server
+certificate under the same CA, preserving other addresses and client files.
+It needs the original CA signing key locally and a daemon restart afterwards;
+see [existing certificate updates](docs/mtls.md#add-tailscale-to-existing-certificates).
+
 ## Use
+
+Linux is the supported desktop. Install the Go toolchain specified in
+`go.mod` and `make`. The default clipboard needs an accessible X11 display or
+a Wayland compositor supporting `wlr-data-control`; it fails if neither is
+available. Keep the session agent enabled for desktop copying.
+
+From the project directory, create `.env` if it does not already exist, then
+build and start the daemon in one terminal:
 
 ```bash
 cp .env.example .env
@@ -34,27 +61,62 @@ make build
 ./bin/sylvad
 ```
 
+In another terminal, from the same directory:
+
 ```bash
+./bin/sylva ping
 ./bin/sylva init
 ./bin/sylva unlock
 ./bin/sylva set
-./bin/sylva set company.com 'secret'
-./bin/sylva set SYLVA_EXAMPLE 'secret' env
-./bin/sylva set 10.0.0.1 'secret' ssh
-./bin/sylva set github-token 'secret'
+./bin/sylva set company.com
+./bin/sylva set mail.company.com --inherit
+./bin/sylva set SYLVA_EXAMPLE env
+./bin/sylva set 10.0.0.1 ssh
+./bin/sylva set github-token password
 ./bin/sylva get mail.company.com
 ./bin/sylva get SYLVA_EXAMPLE env
 ./bin/sylva get 10.0.0.1 ssh
-./bin/sylva get github-token
+./bin/sylva get github-token password
 ./bin/sylva list
-./bin/sylva update github-token 'new-secret'
-./bin/sylva delete github-token
+./bin/sylva update github-token password
+./bin/sylva delete github-token password
+./bin/sylva lock
 ```
 
 `set` with no args walks through type, credentials, and a hidden double password. Args skip those prompts: `set <id> [password] [type]`. A dotted name or IP defaults to domain. For a domain without a password, Sylva checks for a parent and asks about inherit.
 
-`get <id> [type]` copies the secret to the clipboard. Domain names resolve through inherit. If the type is omitted, Sylva looks up every kind. If it still cannot tell — or an IP could be a domain or ssh — it asks: password, domain, env, or ssh. The agent keeps the clipboard until `clipboard_clear_after`.
+`get <id> [type]` copies the secret to the clipboard. Domain names resolve
+through inherit. Without a type, Sylva probes every kind and asks when the
+result is missing or ambiguous; lookup failures are returned as errors.
+Specify `password`, `domain`, `env`, or `ssh` to query only one kind. The agent
+clears its unchanged clipboard selection after `clipboard_clear_after`
+(default `20s`). Cleanup failures are reported; resolve the issue and retry
+`sylva lock` before reusing the session.
 
 `list` prints type and identifier only. `update` replaces an existing secret. `delete` removes one after confirmation.
 
-Bind and secrets are `.env`. Everything else is `internal/config/default.conf` plus `.sylva/config`. Tests: `make docker-test` / `make docker-smoke`.
+Bind settings and secrets are in `.env`; leave the master passphrase empty
+for interactive desktop use. Other defaults live in
+`internal/config/default.conf`, with overrides in `.sylva/config` or process
+environment. Keep the working directory consistent because default paths are
+relative to it.
+
+`sylva passwd` rotates the master passphrase. `sylva backup <new-file>` writes
+an encrypted archive; `sylva restore <file>` recovers into an uninitialized
+target. Follow the [recovery procedure](docs/howto.md#backup-and-recovery)
+before pointing restore at a server.
+
+## Verify changes
+
+```bash
+make check          # analyses, vulnerability scan, race and lifecycle tests
+make coverage       # .coverage/coverage.out, coverage.txt and coverage.html
+make fuzz FUZZTIME=30s
+make docker-e2e     # isolated mTLS, rotation, backup and recovery checks
+```
+
+Docker E2E needs Linux, Docker Compose v2+, Python 3, and OpenSSL; it creates
+its own certificates and disposable vaults. The older `docker-smoke` target
+uses the configured Compose volume and needs preinstalled certificates and a
+test passphrase. See [setup](docs/setup.md#tests) for Docker test options and
+[CI](docs/ci.md) for job results and coverage artifacts.

@@ -16,7 +16,86 @@ Keep the CA private key offline after you issue certs. Mode `600` on keys.
 
 The server certificate **SAN must match** the host in the client URL (`SYLVA_HOST` / `host` in config). `127.0.0.1` needs an IP SAN. `localhost` or a Docker name like `sylvad` needs a DNS SAN.
 
-## Issue a local CA and a pair of certs
+## Generate certificates
+
+Build the CLI, then run:
+
+```bash
+./bin/sylva cert init
+```
+
+No OpenSSL, running daemon, vault unlock, or existing mTLS config is required.
+This creates `.sylva/certs/` with a CA (`ca.pem`, `ca.key`) and separate server
+and client pairs (`server.pem`, `server.key`, `client.pem`, `client.key`). The
+directory has mode `0700` and all six files have mode `0600`. Keep `ca.key`
+offline after setup; the daemon and CLI do not need it for connections.
+
+The server certificate covers `localhost`, Docker's `sylvad`, `127.0.0.1`, and
+`::1`. Add the actual DNS name or IP used by remote clients at creation time:
+
+```bash
+./bin/sylva cert init --host vault.example.com --host 10.1.2.3
+```
+
+For Tailscale, enable it and let `sylvad` join first. Then, on the daemon
+machine, use `sylva cert init --add-tailscale` to include the embedded node's
+actual full MagicDNS name automatically. The daemon must remain running for
+discovery. Follow the [combined setup](tailscale.md#with-mtls), then enable
+mTLS and restart. The flag can be combined with `--host`.
+
+`--host` is repeatable and adds to the defaults. Supply bare DNS names or IPs,
+without a URL scheme, port, or path. Use the actual dialed address, not a bind
+address such as `0.0.0.0`. Certificates use ECDSA P-256; server/client pairs
+expire after one year and the CA after ten years. Record their expiry dates
+and plan replacement before expiry.
+
+The command always writes to the default `.sylva/certs` path. It refuses an
+existing directory, even an empty directory or symlink; there is no overwrite
+flag or automatic renewal. Keep an existing deployment's CA and issued
+certificates rather than deleting them to rerun initialization. Additional
+device certificates and renewal can be issued separately using that CA with
+external tooling. Generation does not enable mTLS or change config.
+
+## Add Tailscale to existing certificates
+
+Enable Tailscale, restart `sylvad`, and let the embedded node join. On the
+daemon machine, run:
+
+```bash
+./bin/sylva cert add-tailscale
+```
+
+The command discovers the current node name through the local daemon, using
+the existing mTLS client credentials when mTLS is enabled. Local discovery
+must already work; generated bundles cover the loopback IP automatically.
+It reissues only `.sylva/certs/server.pem` with the same CA and server key,
+preserving existing SANs, subject, extensions, and validity dates. Existing
+clients continue to use the same CA and client certificate/key. This does not
+extend the certificate lifetime or switch either feature on/off.
+
+Bring the original CA signing key back to `.sylva/certs/ca.key` locally for
+this operation, then return it to offline storage. Supported unencrypted key
+formats are PKCS#8, EC, and RSA PEM. The command uses the default bundle
+directory, a single issuing CA in `ca.pem`, and regular files; symlink inputs
+are rejected. An expired/invalid chain or mismatched keys is an error.
+If the certificate already covers the detected name, no file changes are
+needed and the CA signing key may remain offline.
+
+Writes are staged, synced, and atomically renamed over `server.pem`; validation
+and failed publication leave the previous certificate intact. Concurrent
+issuers are excluded by `.update.lock`, which remains on disk after release.
+Do not delete that lock while an update is running. Restart native `sylvad`
+after an actual update. If certificate files are bind-mounted into Docker,
+recreate the server container to pick up the replaced file inode:
+
+```bash
+docker compose up -d --force-recreate sylvad
+```
+
+## Manual OpenSSL alternative
+
+<details>
+<summary>Use OpenSSL instead of the built-in generator</summary>
 
 Requires OpenSSL. Adjust SANs if the client will not connect to `127.0.0.1` / `localhost`.
 
@@ -55,6 +134,8 @@ openssl x509 -req -in client.csr -CA ca.pem -CAkey ca.key -CAcreateserial \
 chmod 600 ca.key server.key client.key
 rm -f server.csr client.csr server.ext client.ext
 ```
+
+</details>
 
 A second machine gets **its own** client cert from the same CA. Copy `ca.pem` plus that client pair; never reuse `server.key` on the CLI host unless it is the same machine.
 
@@ -126,6 +207,8 @@ disabled. The server service does not import the CLI's master passphrase from
 
 ```bash
 cp .env.example .env  # only when .env does not already exist
+make build
+./bin/sylva cert init  # only for a new certificate directory
 DOCKER_BUILDKIT=0 COMPOSE_BAKE=false docker compose up -d --build sylvad
 docker compose run --rm sylva ping
 ```

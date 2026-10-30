@@ -1,6 +1,6 @@
 # Setup
 
-Sylva is two binaries. Tunables (timeouts, Argon2id, password length, paths) ship in `internal/config/default.conf` and optional `.sylva/config`. `.env` is only host, port, and secrets (auth key, passphrase). `sylvad` stores ciphertext in SQLite. `sylva` encrypts on the client, talks to the daemon, and copies secrets to the clipboard. The server never sees plaintext or identifiers (only a blind index and type).
+Sylva is two binaries. Tunables (timeouts, Argon2id, password length, paths) ship in `internal/config/default.conf` and optional `.sylva/config`. `.env` is only host, port, and secrets (auth key, passphrase). `sylvad` stores ciphertext in SQLite. `sylva` encrypts on the client, talks to the daemon, and copies secrets to the clipboard. Secret values and identifiers remain encrypted on the server. Record IDs, types, blind indexes and parent links, versions, timestamps, and ciphertext sizes remain visible as metadata.
 
 This page is a first run on **localhost over HTTP**. TLS 1.3 mTLS is optional and later: [mtls.md](mtls.md). Tailscale is optional: [tailscale.md](tailscale.md).
 
@@ -54,7 +54,12 @@ Once, against an empty server:
 
 That writes the Argon2id **salt** as server metadata. Clients derive the master key from your passphrase plus this salt. Re-running `init` is safe if the salt already exists; it does not rotate it.
 
-If you lose the passphrase, ciphertext in SQLite cannot be recovered. Back up `.sylva/sylvad.db` (and certs if you later enable mTLS). The file is still not readable without the passphrase.
+If you lose the passphrase, ciphertext in SQLite cannot be recovered. Use
+`sylva backup <new-file>` for an encrypted archive and follow the
+[backup and recovery how-to](howto.md#backup-and-recovery). For a direct SQLite
+copy, stop the daemon first and preserve all metadata; copying a live `.db`
+alone can miss writes held in the WAL. Protect transport certificates and
+private keys separately from the encrypted vault backup.
 
 ## Unlock
 
@@ -144,7 +149,8 @@ the underlying issue and retry cleanup explicitly.
 ./bin/sylva set 10.0.0.1 'secret' ssh
 ./bin/sylva get mail.company.com
 ./bin/sylva list
-./bin/sylva update github-token 'new-secret'
+./bin/sylva set github-token password
+./bin/sylva update github-token password
 ./bin/sylva delete github-token --yes
 ```
 
@@ -163,7 +169,7 @@ visible, subject to the existing cache fallback rules described above.
 Specify a type explicitly (`sylva get <id> password`, for example) when you
 want to query only that type.
 
-Updates carry the version that was read before editing. The server atomically accepts only the next version; if another device has already changed that record, the update fails with HTTP 409 and asks you to fetch it again. Sylva does not automatically retry a stale edit or merge it over newer data. A deleted and recreated identifier has a different record ID, so an old edit cannot replace it. Upgrade both the server and clients to use this behavior.
+Updates carry the fetched record's version. The server atomically accepts only the next version; if another device changes the record between that fetch and the write, the update fails with HTTP 409 and asks you to fetch it again. Sylva does not automatically retry a stale edit or merge it over newer data. A deleted and recreated identifier has a different record ID, so an old edit cannot replace it. Upgrade both the server and clients to use this behavior.
 
 `delete` asks for confirmation unless `--yes` is supplied. Time spent choosing
 a secret type or answering the confirmation does not consume the deletion
@@ -227,6 +233,10 @@ decoded records, and cryptographic buffers before raising them.
 
 ## Tests
 
+The [CI guide](ci.md) lists independent jobs, coverage artifacts, local commands,
+and required-check configuration. The [how-to](howto.md) covers daily use,
+passphrase rotation, backup/recovery, and common failures.
+
 `make docker-e2e` runs the same Docker integration test as the separate
 `Docker mTLS and recovery` CI job. It requires Docker with Compose v2+, OpenSSL,
 and Python 3 on Linux. No existing `.env`, certificates, or running daemon are
@@ -269,8 +279,9 @@ and wait for workers to stop; do not broadly ignore application goroutines.
 
 ```bash
 make check
+make coverage
 make docker-test
-make docker-smoke
+make docker-e2e
 ```
 
 Nil items, blank identifiers, missing type payloads, incomplete encrypted
