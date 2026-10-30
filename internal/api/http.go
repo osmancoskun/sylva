@@ -12,11 +12,12 @@ import (
 // HTTP path fragments. Absolute paths are joined with SYLVA_API_PREFIX except
 // when Endpoint.Prefixed is false (health checks).
 const (
-	PathPing      = "/ping"
-	PathHealthz   = "/healthz"
-	PathRecords   = "/records"
-	PathRecordID  = "/records/{id}"
-	PathVaultSalt = "/vault/salt"
+	PathPing          = "/ping"
+	PathHealthz       = "/healthz"
+	PathRecords       = "/records"
+	PathRecordID      = "/records/{id}"
+	PathVaultSalt     = "/vault/salt"
+	PathVaultKeyCheck = "/vault/key-check"
 )
 
 // Query and path parameter names shared by the HTTP client and server.
@@ -37,6 +38,8 @@ const (
 	EndpointListRecords  = "records.list"
 	EndpointGetSalt      = "vault.salt.get"
 	EndpointPutSalt      = "vault.salt.put"
+	EndpointGetKeyCheck  = "vault.key-check.get"
+	EndpointPutKeyCheck  = "vault.key-check.put"
 )
 
 // ContentTypeJSON is the JSON media type used by every HTTP API response.
@@ -63,6 +66,8 @@ func HTTPEndpoints() []Endpoint {
 		{Name: EndpointListRecords, Method: http.MethodGet, Path: PathRecords, Prefixed: true},
 		{Name: EndpointGetSalt, Method: http.MethodGet, Path: PathVaultSalt, Prefixed: true},
 		{Name: EndpointPutSalt, Method: http.MethodPut, Path: PathVaultSalt, Prefixed: true},
+		{Name: EndpointGetKeyCheck, Method: http.MethodGet, Path: PathVaultKeyCheck, Prefixed: true},
+		{Name: EndpointPutKeyCheck, Method: http.MethodPut, Path: PathVaultKeyCheck, Prefixed: true},
 	}
 }
 

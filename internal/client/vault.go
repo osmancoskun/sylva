@@ -87,12 +87,18 @@ func (v *Vault) Init(ctx context.Context) ([]byte, error) {
 		v.cacheSalt(ctx, salt)
 		return salt, nil
 	}
+	if !errors.Is(err, storage.ErrNotFound) {
+		return nil, fmt.Errorf("read vault salt: %w", err)
+	}
 
 	salt, err = crypto.GenerateSalt(v.cfg.Crypto.KDFSaltLen)
 	if err != nil {
 		return nil, err
 	}
 	if err := v.remote.PutSalt(ctx, salt); err != nil {
+		if errors.Is(err, storage.ErrConflict) {
+			return v.remote.GetSalt(ctx)
+		}
 		return nil, fmt.Errorf("initialize vault salt: %w", err)
 	}
 	v.cacheSalt(ctx, salt)
@@ -101,8 +107,9 @@ func (v *Vault) Init(ctx context.Context) ([]byte, error) {
 
 // Unlock derives the master key from the passphrase and the server-held salt.
 func (v *Vault) Unlock(ctx context.Context, passphrase string) error {
+	v.clearMasterKey()
 	if strings.TrimSpace(passphrase) == "" {
-		return errors.New("master passphrase cannot be empty (set SYLVA_MASTER_PASSPHRASE)")
+		return errors.New("master passphrase cannot be empty")
 	}
 	salt, err := v.Init(ctx)
 	if err != nil {
@@ -113,11 +120,28 @@ func (v *Vault) Unlock(ctx context.Context, passphrase string) error {
 		return err
 	}
 	defer crypto.ZeroBytes(key)
-	return v.UnlockWithKey(key)
+	if err := v.verifyKey(ctx, key, true); err != nil {
+		return err
+	}
+	return v.installKey(key)
 }
 
-// UnlockWithKey installs an already-derived master key (for example from the session agent).
-func (v *Vault) UnlockWithKey(key []byte) error {
+// UnlockWithKey verifies an agent key against this server before installing it.
+// Only passphrase unlock may initialize or migrate a vault verifier.
+func (v *Vault) UnlockWithKey(ctx context.Context, key []byte) error {
+	v.clearMasterKey()
+	if err := v.verifyKey(ctx, key, false); err != nil {
+		return err
+	}
+	return v.installKey(key)
+}
+
+func (v *Vault) clearMasterKey() {
+	crypto.ZeroBytes(v.masterKey)
+	v.masterKey = nil
+}
+
+func (v *Vault) installKey(key []byte) error {
 	if int(v.cfg.Crypto.KDFKeyLen) <= 0 || len(key) != int(v.cfg.Crypto.KDFKeyLen) {
 		return fmt.Errorf("master key must be %d bytes", v.cfg.Crypto.KDFKeyLen)
 	}

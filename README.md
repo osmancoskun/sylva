@@ -32,6 +32,7 @@ make build
 
 ```bash
 ./bin/sylva init
+./bin/sylva unlock
 ./bin/sylva set
 ./bin/sylva set company.com 'secret'
 ./bin/sylva set SYLVA_EXAMPLE 'secret' env

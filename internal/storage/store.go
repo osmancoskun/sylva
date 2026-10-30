@@ -12,6 +12,8 @@ import (
 const (
 	// MetadataKDFSalt is the metadata key for the vault-wide Argon2id salt.
 	MetadataKDFSalt = "kdf_salt"
+	// MetadataKeyCheck is the immutable encrypted master-key verifier.
+	MetadataKeyCheck = "key_check_v1"
 )
 
 var (
@@ -32,5 +34,6 @@ type Store interface {
 	List(ctx context.Context, secretType vault.SecretType) ([]*vault.EncryptedRecord, error)
 	Delete(ctx context.Context, id string) error
 	PutMetadata(ctx context.Context, key string, value []byte) error
+	CreateMetadata(ctx context.Context, key string, value []byte) error // insert-only, atomic
 	GetMetadata(ctx context.Context, key string) ([]byte, error)
 }

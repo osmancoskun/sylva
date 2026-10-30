@@ -30,7 +30,10 @@ func openUnlocked(cfg config.ClientConfig) (*sylva.Vault, error) {
 		if ac, err := agent.Dial(cfg.AgentSocketPath, cfg.Timeout); err == nil {
 			key, keyErr := ac.MasterKey()
 			if keyErr == nil {
-				if err := v.UnlockWithKey(key); err != nil {
+				ctx, cancel := context.WithTimeout(context.Background(), cfg.Timeout)
+				err := v.UnlockWithKey(ctx, key)
+				cancel()
+				if err != nil {
 					crypto.ZeroBytes(key)
 					_ = v.Close()
 					return nil, err
@@ -41,7 +44,7 @@ func openUnlocked(cfg config.ClientConfig) (*sylva.Vault, error) {
 		}
 	}
 
-	passphrase, err := resolvePassphrase(cfg)
+	passphrase, err := resolvePassphrase(cfg, v)
 	if err != nil {
 		_ = v.Close()
 		return nil, err
@@ -56,7 +59,7 @@ func openUnlocked(cfg config.ClientConfig) (*sylva.Vault, error) {
 	return v, nil
 }
 
-func resolvePassphrase(cfg config.ClientConfig) (string, error) {
+func resolvePassphrase(cfg config.ClientConfig, v *sylva.Vault) (string, error) {
 	if strings.TrimSpace(cfg.MasterPassphrase) != "" {
 		return cfg.MasterPassphrase, nil
 	}
@@ -67,20 +70,45 @@ func resolvePassphrase(cfg config.ClientConfig) (string, error) {
 			return secret, nil
 		}
 	}
-	return "", errors.New("master passphrase cannot be empty (set SYLVA_MASTER_PASSPHRASE, run sylva unlock, or enable the OS keyring)")
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.Timeout)
+	defer cancel()
+	setup, err := v.NeedsPassphraseSetup(ctx)
+	if err != nil {
+		return "", fmt.Errorf("check vault setup: %w", err)
+	}
+	label := "Master passphrase: "
+	if setup {
+		label = "New master passphrase: "
+	}
+	passphrase, err := promptMasterPassphrase(label)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(passphrase) == "" {
+		return "", errors.New("master passphrase cannot be empty")
+	}
+	if setup {
+		confirmation, err := promptMasterPassphrase("Confirm master passphrase: ")
+		if err != nil {
+			return "", err
+		}
+		if passphrase != confirmation {
+			return "", errors.New("master passphrases do not match")
+		}
+	}
+	return passphrase, nil
 }
 
 func runUnlock(cfg config.ClientConfig) error {
-	passphrase, err := resolvePassphrase(cfg)
-	if err != nil {
-		return err
-	}
-
 	v, err := sylva.Open(cfg)
 	if err != nil {
 		return err
 	}
 	defer v.Close()
+	passphrase, err := resolvePassphrase(cfg, v)
+	if err != nil {
+		return err
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.Timeout)
 	defer cancel()
@@ -100,10 +128,9 @@ func runUnlock(cfg config.ClientConfig) error {
 		return nil
 	}
 
-	ac, err := agent.Dial(cfg.AgentSocketPath, cfg.Timeout)
+	ac, err := ensureAgent(cfg)
 	if err != nil {
-		fmt.Println("Vault verified. Start `sylva agent` to keep the session unlocked without a passphrase.")
-		return nil
+		return fmt.Errorf("start session agent: %w", err)
 	}
 	key, err := v.CopyMasterKey()
 	if err != nil {

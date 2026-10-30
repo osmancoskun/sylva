@@ -153,7 +153,11 @@ func (s *Server) handlePutSalt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.store.PutMetadata(r.Context(), storage.MetadataKDFSalt, salt); err != nil {
+	if err := s.store.CreateMetadata(r.Context(), storage.MetadataKDFSalt, salt); err != nil {
+		if errors.Is(err, storage.ErrConflict) {
+			writeJSON(w, http.StatusConflict, api.ErrorBody{Error: "vault salt is already initialized"})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, api.ErrorBody{Error: "failed to persist vault salt"})
 		return
 	}

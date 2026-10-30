@@ -47,19 +47,23 @@ Secret commands need a master key. Resolution order:
 1. Session agent (unix socket `agent_socket_path`), if `agent_enabled=true`
 2. `SYLVA_MASTER_PASSPHRASE` in `.env` (convenient for smoke tests; leave empty on a real machine)
 3. Linux kernel keyring, if `keyring_enabled=true` in config and you have run `sylva unlock`
-4. Otherwise the command fails closed
+4. A terminal prompt with echo disabled. Redirected stdin is never used for the master passphrase.
 
 Typical interactive flow:
 
 ```bash
-# optional: keep the agent in another terminal
-./bin/sylva agent
-
-# passphrase from the environment for this shell only, then:
-SYLVA_MASTER_PASSPHRASE='your-passphrase' ./bin/sylva unlock
+./bin/sylva unlock
+# First use: enter and confirm a new master passphrase.
+# Later: enter the existing master passphrase.
 ```
 
-`get` starts a detached agent if none is listening, so the CLI can exit while the agent owns the clipboard until `clipboard_clear_after`. `sylva lock` wipes the agent key and the keyring entry.
+`unlock` verifies the passphrase before storing anything in the agent or keyring, and starts the agent if needed. `get` also starts a detached agent if none is listening, so the CLI can exit while the agent owns the clipboard until `clipboard_clear_after`. `sylva lock` wipes the agent key and the keyring entry.
+
+The first passphrase unlock of an empty vault establishes its master passphrase by storing an encrypted key verifier in server metadata. The verifier remains after all secrets are deleted; a wrong passphrase cannot reopen an empty vault. `init` alone creates only the salt, so it does not establish a passphrase. An explicitly configured passphrase is used without the interactive confirmation.
+
+Existing vaults without a verifier are upgraded automatically only after every stored record authenticates with the supplied passphrase. A wrong passphrase, damaged record, or server error aborts the unlock. Upgrade both binaries and all clients together; older clients do not enforce this verification. Back up the entire SQLite database, including metadata. A legacy vault with no records has no previous passphrase to verify and establishes one on its first unlock.
+
+Passphrase unlock and session-agent key reuse both require the server's verifier; cached records are never used to bypass verification. If the server cannot be reached, unlocking fails. Noninteractive scripts must explicitly supply `SYLVA_MASTER_PASSPHRASE`.
 
 ## Secrets
 

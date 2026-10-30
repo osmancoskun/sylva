@@ -241,6 +241,15 @@ func (s *SQLiteStore) PutMetadata(ctx context.Context, key string, value []byte)
 	return nil
 }
 
+// CreateMetadata initializes metadata without replacing an existing value.
+func (s *SQLiteStore) CreateMetadata(ctx context.Context, key string, value []byte) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO metadata (key, value) VALUES (?, ?)`, key, value)
+	if isUniqueConstraint(err) {
+		return ErrConflict
+	}
+	return err
+}
+
 // GetMetadata loads an opaque metadata value.
 func (s *SQLiteStore) GetMetadata(ctx context.Context, key string) ([]byte, error) {
 	var value []byte
