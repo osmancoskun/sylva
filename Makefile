@@ -9,8 +9,10 @@ export DOCKER_BUILDKIT := 0
 export COMPOSE_BAKE := false
 DOCKER_COMPOSE := docker compose
 FUZZTIME ?= 10s
+BENCHTIME ?= 2s
+PROFILE_DIR ?= .profiles
 
-.PHONY: all build build-cli build-daemon test vet check fuzz clean docker-test docker-smoke docker-down
+.PHONY: all build build-cli build-daemon test vet check fuzz bench profile-memory clean docker-test docker-smoke docker-down
 
 all: build
 
@@ -36,6 +38,14 @@ check:
 fuzz:
 	$(GO) test -run '^$$' -fuzz '^FuzzEncryptDecrypt$$' -fuzztime=$(FUZZTIME) -parallel=2 -timeout=5m ./internal/crypto
 	$(GO) test -run '^$$' -fuzz '^FuzzDecryptMalformedEnvelope$$' -fuzztime=$(FUZZTIME) -parallel=2 -timeout=5m ./internal/crypto
+
+bench:
+	$(GO) test -run '^$$' -bench 'Benchmark(VaultRoundTrip|ClipboardLifecycle)$$' -benchmem -benchtime=$(BENCHTIME) -count=1 -timeout=5m ./internal/vault ./internal/clipboard
+
+profile-memory:
+	@mkdir -p "$(PROFILE_DIR)"
+	$(GO) test -run '^$$' -bench '^BenchmarkVaultRoundTrip$$' -benchmem -benchtime=$(BENCHTIME) -count=1 -timeout=5m -memprofilerate=1 -memprofile="$(PROFILE_DIR)/vault.heap" -o "$(PROFILE_DIR)/vault.test" ./internal/vault
+	$(GO) test -run '^$$' -bench '^BenchmarkClipboardLifecycle$$' -benchmem -benchtime=$(BENCHTIME) -count=1 -timeout=5m -memprofilerate=1 -memprofile="$(PROFILE_DIR)/clipboard.heap" -o "$(PROFILE_DIR)/clipboard.test" ./internal/clipboard
 
 docker-test:
 	$(DOCKER_COMPOSE) run --rm --build test

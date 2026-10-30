@@ -97,10 +97,53 @@ Clipboard backends: `auto` (X11 or Wayland), `os`, `memory`, `file`. `auto`/`os`
 
 ## Tests
 
+`make check` runs formatting, `go vet` (including missed context cancellation),
+nilness, Staticcheck, NilAway, HTTP response-body and SQL rows/statement closing
+checks, vulnerability scanning, and uncached tests. A failed analysis does not
+skip the remaining checks; any failure makes the command fail.
+
+Tests check for goroutines left running after package cleanup with goleak.
+The CLI tests use the same check. The race detector runs when a C compiler is
+available, and each test package has a five-minute timeout. Tool versions are
+pinned in `go.mod`; no separate global tool installation is needed.
+
+These checks detect classes of nil dereferences, invalid zero values, resource
+leaks, and races. They do not prove that every empty identifier is invalid or
+that heap usage stays bounded. New long-lived caches, timers, network workers,
+and background services need lifecycle tests and, when appropriate, repeated
+load tests with heap profiles. Test cleanup must close resources, cancel work,
+and wait for workers to stop; do not broadly ignore application goroutines.
+
 ```bash
+make check
 make docker-test
 make docker-smoke
 ```
+
+Nil items, blank identifiers, missing type payloads, incomplete encrypted
+envelopes, and repeated clipboard copy/close cycles have regression tests in
+`make check`. Fuzz seed cases run with the ordinary tests. CI also mutates
+inputs for five seconds per fuzz target; run longer sessions locally:
+
+```bash
+make fuzz FUZZTIME=30s
+make bench BENCHTIME=5s
+make profile-memory BENCHTIME=5s
+go tool pprof -top -alloc_space .profiles/vault.heap
+go tool pprof -top -inuse_space .profiles/vault.heap
+go tool pprof -top -inuse_space .profiles/clipboard.heap
+```
+
+The benchmarks exercise 1 KiB/64 KiB vault records and clipboard timer
+creation/cancellation, using synthetic secrets only. Profiles and test binaries
+go into the gitignored `.profiles/` directory (`PROFILE_DIR` overrides it).
+Profiling every allocation is intentionally slower than `make bench`.
+Compare runs with the same Go version, hardware, payload, and duration.
+`alloc_space` shows cumulative allocation; `inuse_space` shows retained heap.
+Neither allocations per operation nor one heap snapshot proves a leak. If
+retained heap grows with repeated work, compare profiles at increasing workload
+sizes before adding a stable regression bound. Machine-dependent memory limits
+are not used as CI pass/fail thresholds.
 
 `docker-smoke` brings up compose (`sylvad` as hostname `sylvad`). `make docker-down` removes the volume.
 

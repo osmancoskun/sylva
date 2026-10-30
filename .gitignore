@@ -15,6 +15,7 @@ dist/
 # Output of the go coverage tool
 *.out
 coverage.html
+.profiles/
 
 # Go workspace file
 go.work
