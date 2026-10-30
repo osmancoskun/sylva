@@ -8,8 +8,9 @@ GOFLAGS :=
 export DOCKER_BUILDKIT := 0
 export COMPOSE_BAKE := false
 DOCKER_COMPOSE := docker compose
+FUZZTIME ?= 10s
 
-.PHONY: all build build-cli build-daemon test vet check clean docker-test docker-smoke docker-down
+.PHONY: all build build-cli build-daemon test vet check fuzz clean docker-test docker-smoke docker-down
 
 all: build
 
@@ -24,13 +25,17 @@ build-daemon:
 	$(GO) build $(GOFLAGS) -o $(BUILD_DIR)/$(BINARY_DAEMON) ./cmd/sylvad
 
 test:
-	$(GO) test -race -cover ./...
+	$(GO) test -race -count=1 -timeout=5m -cover ./...
 
 vet:
 	$(GO) vet ./...
 
 check:
 	./scripts/check.sh
+
+fuzz:
+	$(GO) test -run '^$$' -fuzz '^FuzzEncryptDecrypt$$' -fuzztime=$(FUZZTIME) -parallel=2 -timeout=5m ./internal/crypto
+	$(GO) test -run '^$$' -fuzz '^FuzzDecryptMalformedEnvelope$$' -fuzztime=$(FUZZTIME) -parallel=2 -timeout=5m ./internal/crypto
 
 docker-test:
 	$(DOCKER_COMPOSE) run --rm --build test

@@ -96,6 +96,9 @@ type SecretItem struct {
 
 // Validate checks that the SecretItem has a valid type, identifier, and matching payload.
 func (s *SecretItem) Validate() error {
+	if s == nil {
+		return errors.New("secret item cannot be nil")
+	}
 	if strings.TrimSpace(s.ID) == "" {
 		return errors.New("secret ID cannot be empty")
 	}
