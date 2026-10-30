@@ -152,6 +152,17 @@ the underlying issue and retry cleanup explicitly.
 
 `get` copies to the clipboard (it does not print the secret). If the type is omitted, Sylva probes every kind and asks when the match is empty or ambiguous.
 
+Automatic type lookup skips missing entries and skips the domain candidate
+when the identifier cannot be normalized as a domain. A failed domain lookup
+returns an error instead of selecting an earlier password/token match or
+prompting as if the domain were missing. This includes HTTP failures (even a
+404 from the domain-list endpoint), malformed responses, corrupted encrypted
+logins, and inheritance cycles. Invalid stored domains are errors too; they
+are distinguished from invalid lookup input. Cancellation/timeouts remain
+visible, subject to the existing cache fallback rules described above.
+Specify a type explicitly (`sylva get <id> password`, for example) when you
+want to query only that type.
+
 Updates carry the version that was read before editing. The server atomically accepts only the next version; if another device has already changed that record, the update fails with HTTP 409 and asks you to fetch it again. Sylva does not automatically retry a stale edit or merge it over newer data. A deleted and recreated identifier has a different record ID, so an old edit cannot replace it. Upgrade both the server and clients to use this behavior.
 
 Clipboard backends: `auto` (X11 or Wayland), `os`, `memory`, `file`. `auto`/`os` need the agent. Docker smoke uses `memory`.

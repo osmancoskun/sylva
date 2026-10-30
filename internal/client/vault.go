@@ -268,10 +268,14 @@ type SecretMatch struct {
 	Value string
 }
 
-// ProbeValues returns every secret type that currently stores this identifier.
+// ProbeValues returns every matching secret type. Only missing entries and an
+// input which cannot be a domain are skipped; failed lookups return no matches.
 func (v *Vault) ProbeValues(ctx context.Context, identifier string, cascade bool, envVariable string) ([]SecretMatch, error) {
 	if err := v.requireUnlocked(); err != nil {
 		return nil, err
+	}
+	if strings.TrimSpace(identifier) == "" {
+		return nil, errors.New("identifier is required")
 	}
 	var matches []SecretMatch
 	for _, candidate := range []vault.SecretType{
@@ -280,21 +284,36 @@ func (v *Vault) ProbeValues(ctx context.Context, identifier string, cascade bool
 		vault.SecretTypeEnv,
 		vault.SecretTypeSSH,
 	} {
-		value, err := v.valueOf(ctx, identifier, candidate, cascade && candidate == vault.SecretTypeLogin, envVariable)
+		lookup := identifier
+		if candidate == vault.SecretTypeLogin {
+			// Classify invalid *input* before reading remote/cached records.
+			// The same error from a stored login must remain visible.
+			var err error
+			lookup, err = tree.NormalizeDomain(identifier)
+			if err != nil {
+				continue
+			}
+		}
+		value, err := v.valueOf(ctx, lookup, candidate, cascade && candidate == vault.SecretTypeLogin, envVariable)
 		if err == nil {
 			matches = append(matches, SecretMatch{Type: candidate, Value: value})
 			continue
 		}
-		if isMissingSecret(err) || candidate == vault.SecretTypeLogin {
+		if isMissingSecret(candidate, err) {
 			continue
 		}
-		return nil, err
+		return nil, fmt.Errorf("probe %s: %w", secretLabel(candidate), err)
 	}
 	return matches, nil
 }
 
-func isMissingSecret(err error) bool {
-	return errors.Is(err, storage.ErrNotFound) || errors.Is(err, tree.ErrDomainNotFound) || errors.Is(err, tree.ErrEmptyDomain)
+func isMissingSecret(kind vault.SecretType, err error) bool {
+	if kind == vault.SecretTypeLogin {
+		// An empty domain tree resolves with ErrDomainNotFound. HTTP 404 from
+		// the list endpoint itself is an upstream failure, not a missing login.
+		return errors.Is(err, tree.ErrDomainNotFound)
+	}
+	return errors.Is(err, storage.ErrNotFound)
 }
 
 // GetSecret loads and unseals a secret by type and identifier.
