@@ -11,8 +11,9 @@ DOCKER_COMPOSE := docker compose
 FUZZTIME ?= 10s
 BENCHTIME ?= 2s
 PROFILE_DIR ?= .profiles
+COVERAGE_DIR ?= .coverage
 
-.PHONY: all build build-cli build-daemon test vet check fuzz bench profile-memory clean docker-test docker-smoke docker-e2e docker-down
+.PHONY: all build build-cli build-daemon test vet check analyze security coverage fuzz bench profile-memory clean docker-test docker-smoke docker-e2e docker-down
 
 all: build
 
@@ -34,6 +35,25 @@ vet:
 
 check:
 	./scripts/check.sh
+
+analyze:
+	./scripts/check.sh analysis
+
+security:
+	./scripts/check.sh security
+
+coverage:
+	@mkdir -p "$(COVERAGE_DIR)"
+	@status=0; \
+	rm -f "$(COVERAGE_DIR)/coverage.out" "$(COVERAGE_DIR)/coverage.txt" "$(COVERAGE_DIR)/coverage.html"; \
+	$(GO) test -race -count=1 -timeout=5m -covermode=atomic -coverprofile="$(COVERAGE_DIR)/coverage.out" ./... || status=$$?; \
+	if [ -s "$(COVERAGE_DIR)/coverage.out" ]; then \
+		$(GO) tool cover -func="$(COVERAGE_DIR)/coverage.out" > "$(COVERAGE_DIR)/coverage.txt" || status=1; \
+		$(GO) tool cover -html="$(COVERAGE_DIR)/coverage.out" -o "$(COVERAGE_DIR)/coverage.html" || status=1; \
+	else \
+		status=1; \
+	fi; \
+	exit $$status
 
 fuzz:
 	$(GO) test -run '^$$' -fuzz '^FuzzEncryptDecrypt$$' -fuzztime=$(FUZZTIME) -parallel=2 -timeout=5m ./internal/crypto

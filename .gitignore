@@ -16,6 +16,7 @@ dist/
 *.out
 coverage.html
 .profiles/
+.coverage/
 
 # Go workspace file
 go.work

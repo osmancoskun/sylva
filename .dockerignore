@@ -4,6 +4,8 @@
 !.env.example
 bin/
 dist/
+.coverage/
+.profiles/
 *.db
 *.db-shm
 *.db-wal
