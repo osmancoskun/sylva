@@ -165,6 +165,11 @@ want to query only that type.
 
 Updates carry the version that was read before editing. The server atomically accepts only the next version; if another device has already changed that record, the update fails with HTTP 409 and asks you to fetch it again. Sylva does not automatically retry a stale edit or merge it over newer data. A deleted and recreated identifier has a different record ID, so an old edit cannot replace it. Upgrade both the server and clients to use this behavior.
 
+`delete` asks for confirmation unless `--yes` is supplied. Time spent choosing
+a secret type or answering the confirmation does not consume the deletion
+request's timeout; that timeout starts after approval. Declining or reaching
+end-of-input without approval leaves the record untouched.
+
 Clipboard backends: `auto` (X11 or Wayland), `os`, `memory`, `file`. `auto`/`os` need the agent. Docker smoke uses `memory`.
 
 `auto` and `os` fail when the desktop clipboard is unavailable; they never

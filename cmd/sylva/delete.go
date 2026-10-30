@@ -32,10 +32,9 @@ func runDelete(cfg config.ClientConfig, args []string) error {
 	}
 	defer v.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), cfg.Timeout)
-	defer cancel()
-
-	kind, err = resolveStoredType(ctx, v, identifier, kind)
+	lookupCtx, cancelLookup := context.WithTimeout(context.Background(), cfg.Timeout)
+	kind, err = resolveStoredType(lookupCtx, v, identifier, kind)
+	cancelLookup()
 	if err != nil {
 		return err
 	}
@@ -50,6 +49,10 @@ func runDelete(cfg config.ClientConfig, args []string) error {
 		}
 	}
 
+	// Time spent selecting a type or confirming deletion must not consume the
+	// deletion request's network timeout.
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.Timeout)
+	defer cancel()
 	if err := v.DeleteSecret(ctx, kind, identifier); err != nil {
 		return err
 	}
