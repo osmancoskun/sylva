@@ -135,3 +135,5 @@ its own certificates and disposable vaults. The older `docker-smoke` target
 uses the configured Compose volume and needs preinstalled certificates and a
 test passphrase. See [setup](docs/setup.md#tests) for Docker test options and
 [CI](docs/ci.md) for job results and coverage artifacts.
+
+Sylva is licensed under [GPL-3.0-only](LICENSE).
