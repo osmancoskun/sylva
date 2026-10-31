@@ -140,7 +140,10 @@ func runUnlock(cfg config.ClientConfig) error {
 		fmt.Println("Vault unlocked for this process")
 		return nil
 	}
+	return publishSessionKey(cfg, v)
+}
 
+func publishSessionKey(cfg config.ClientConfig, v *sylva.Vault) error {
 	ac, err := ensureAgent(cfg)
 	if err != nil {
 		return fmt.Errorf("start session agent: %w", err)

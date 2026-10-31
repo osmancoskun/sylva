@@ -25,7 +25,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  ping                 Check connectivity and status of the sylvad server\n")
 		fmt.Fprintf(os.Stderr, "  version              Print client version information\n")
 		fmt.Fprintf(os.Stderr, "  init                 Initialize the vault salt on the server\n")
-		fmt.Fprintf(os.Stderr, "  unlock               Unlock the session agent / OS keyring\n")
+		fmt.Fprintf(os.Stderr, "  unlock [--ssh]       Unlock with the master passphrase or a registered SSH key\n")
+		fmt.Fprintf(os.Stderr, "  ssh add <pubkey>     Register an Ed25519 SSH agent key using the master passphrase\n")
+		fmt.Fprintf(os.Stderr, "  ssh status|remove    Inspect or remove this device's SSH unlock registration\n")
 		fmt.Fprintf(os.Stderr, "  lock                 Wipe the session agent / OS keyring\n")
 		fmt.Fprintf(os.Stderr, "  passwd               Change the master passphrase atomically\n")
 		fmt.Fprintf(os.Stderr, "  backup <file>        Write an encrypted vault backup\n")
@@ -94,7 +96,11 @@ func main() {
 			fatal(err)
 		}
 	case "unlock":
-		if err := runUnlock(cfg); err != nil {
+		if err := runUnlockCommand(cfg, args[1:]); err != nil {
+			fatal(err)
+		}
+	case "ssh":
+		if err := runSSH(cfg, args[1:]); err != nil {
 			fatal(err)
 		}
 	case "lock":

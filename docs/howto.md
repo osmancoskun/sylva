@@ -62,6 +62,74 @@ shell history and process arguments. `list` prints identifiers and types;
 use `delete <id> <type> --yes`. Otherwise deletion waits for approval, with
 a fresh network deadline after you answer.
 
+## Unlock using an SSH agent
+
+The master passphrase remains the vault's recovery and normal unlock method.
+You can also register an ordinary Ed25519 key already loaded in your local
+SSH agent. On each device, connect to the intended server, establish the vault's
+master passphrase with `sylva unlock` if needed, then run:
+
+```bash
+ssh-add ~/.ssh/id_ed25519
+./bin/sylva ssh add ~/.ssh/id_ed25519.pub
+# Enter the existing vault master passphrase to authorize this device's key.
+./bin/sylva ssh status
+./bin/sylva unlock --ssh
+./bin/sylva get github-token password
+./bin/sylva lock
+```
+
+`ssh add` reads only the public key file and requires the master passphrase
+even if a Sylva session is already open. The corresponding private key must
+be available through `SSH_AUTH_SOCK`. Agent policies still apply: approval
+may be required, and registration performs two signing requests to check
+repeatability. RSA, ECDSA, SSH certificates and `sk-*` FIDO keys are not
+supported by this unlock format. No SSH key is generated or loaded by Sylva.
+
+`unlock --ssh` opens the Sylva session agent, so `agent_enabled=true` is
+required (the default). Subsequent commands reuse that session normally.
+`sylva unlock` without the flag continues using the existing master-passphrase
+and OS-keyring flow. A missing/locked SSH agent, rejected approval, damaged
+registration or failed server verification is an error; SSH unlock does not
+silently fall back to another method. Use plain `sylva unlock` to choose the
+master passphrase instead. `lock` wipes the active session; reopening through
+SSH requires another explicit `unlock --ssh`.
+
+The local registration is a 0600 file in `.sylva/ssh/` (override
+`ssh_unlock_dir` in `.sylva/config` or `SYLVA_SSH_UNLOCK_DIR` in the process
+environment). It contains the public key, random salt and an encrypted copy
+of the vault key, bound to the server URL and API prefix. SSH signatures and
+unwrapped vault keys are never written to this file. The key is verified
+against the live server before the session is opened, so SSH unlock requires
+connectivity. Remote mTLS/Tailscale access settings still apply.
+
+For A and B, register each device separately with the same master passphrase;
+their SSH keys may differ. Neither A's session nor its private SSH key needs
+to be copied to B. Registrations are local conveniences and are not included
+in server backups. The master-passphrase backup/restore format is unchanged.
+After `sylva passwd`, use the new master passphrase and register SSH again:
+
+```bash
+./bin/sylva ssh remove
+./bin/sylva ssh add ~/.ssh/id_ed25519.pub
+```
+
+`ssh remove` deletes only this device's local registration. It does not close
+an open session, unload the SSH key or revoke copies of the registration.
+Use `sylva lock` to close a session; change the master passphrase to invalidate
+existing SSH registrations against the current vault.
+
+Treat a registered SSH agent as access to the vault: anyone who can request
+its signature and obtain the local registration can recover the vault key.
+This includes a host to which you forward that agent. A captured signature
+for this registration can unlock its encrypted key later, even after the
+agent is locked. Keep registrations private, avoid forwarding the registered
+key to untrusted hosts, and use an agent confirmation policy where appropriate.
+The signing payload uses the OpenSSH SSHSIG format with a Sylva-specific
+namespace; HKDF-SHA256 derives the AES-256-GCM wrapping key from the verified,
+deterministic Ed25519 signature. This is a convenience unlock mechanism, not
+a second authentication factor.
+
 ## Domains, environment variables, and SSH
 
 ```bash

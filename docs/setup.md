@@ -80,6 +80,12 @@ Typical interactive flow:
 
 `unlock` verifies the passphrase before storing anything in the agent or keyring, and starts the agent if needed. `get` also starts a detached agent if none is listening, so the CLI can exit while the agent owns the clipboard until `clipboard_clear_after`. `sylva lock` wipes the agent key and the keyring entry.
 
+An optional Ed25519 SSH-agent unlock can be registered separately on each
+device with `sylva ssh add <public-key-file>`, authorized by the existing
+master passphrase. Use `sylva unlock --ssh` to open the session with that key.
+See [SSH unlock](howto.md#unlock-using-an-ssh-agent) for supported keys, local
+registration files, rotation and agent-access implications.
+
 The first passphrase unlock of an empty vault establishes its master passphrase by storing an encrypted key verifier in server metadata. The verifier remains after all secrets are deleted; a wrong passphrase cannot reopen an empty vault. `init` alone creates only the salt, so it does not establish a passphrase. An explicitly configured passphrase is used without the interactive confirmation.
 
 Existing vaults without a verifier are upgraded automatically only after every stored record authenticates with the supplied passphrase. A wrong passphrase, damaged record, or server error aborts the unlock. Upgrade both binaries and all clients together; older clients do not enforce this verification. Back up the entire SQLite database, including metadata. A legacy vault with no records has no previous passphrase to verify and establishes one on its first unlock.

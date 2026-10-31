@@ -83,6 +83,11 @@ In another terminal, from the same directory:
 ./bin/sylva lock
 ```
 
+You can also register a local Ed25519 SSH-agent key with
+`sylva ssh add ~/.ssh/id_ed25519.pub` using the existing master passphrase,
+then use `sylva unlock --ssh`. See the [SSH unlock guide](docs/howto.md#unlock-using-an-ssh-agent)
+for device enrollment, supported keys and recovery behavior.
+
 `set` with no args walks through type, credentials, and a hidden double password. Args skip those prompts: `set <id> [password] [type]`. A dotted name or IP defaults to domain. For a domain without a password, Sylva checks for a parent and asks about inherit.
 
 `get <id> [type]` copies the secret to the clipboard. Domain names resolve

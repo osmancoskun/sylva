@@ -64,7 +64,7 @@ func knownKey(key string) bool {
 		"master_passphrase",
 		"clipboard_clear_after", "clipboard_backend", "clipboard_file",
 		"agent_enabled", "agent_idle_timeout", "agent_request_timeout", "agent_max_request_bytes", "agent_max_connections", "agent_socket_path", "agent_log_path",
-		"keyring_enabled", "keyring_service", "keyring_user",
+		"keyring_enabled", "keyring_service", "keyring_user", "ssh_unlock_dir",
 		"mtls", "ca_cert_path", "server_cert_path", "server_key_path", "client_cert_path", "client_key_path",
 		"tailscale", "tailscale_node", "tailscale_state_dir", "tailscale_authkey", "tailscale_tags":
 		return true

@@ -84,6 +84,7 @@ type ClientConfig struct {
 	KeyringEnabled       bool
 	KeyringService       string
 	KeyringUser          string
+	SSHUnlockDir         string
 	ConfigPath           string
 	EnableMTLS           bool
 	CACertPath           string
@@ -341,6 +342,9 @@ func LoadClientConfig(envPath string) (ClientConfig, error) {
 	if err != nil {
 		return ClientConfig{}, err
 	}
+	if strings.TrimSpace(s.get("ssh_unlock_dir")) == "" {
+		return ClientConfig{}, fmt.Errorf("ssh_unlock_dir must not be empty")
+	}
 	cryptoCfg, err := cryptoFromSettings(s)
 	if err != nil {
 		return ClientConfig{}, err
@@ -395,6 +399,7 @@ func LoadClientConfig(envPath string) (ClientConfig, error) {
 		KeyringEnabled:       keyringEnabled,
 		KeyringService:       s.get("keyring_service"),
 		KeyringUser:          s.get("keyring_user"),
+		SSHUnlockDir:         s.get("ssh_unlock_dir"),
 		ConfigPath:           envPath,
 		EnableMTLS:           enableMTLS,
 		CACertPath:           caCertPath,
