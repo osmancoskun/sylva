@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
-"""Regression checks for build and RPM version normalization."""
+"""Regression checks for release versioning, Git changelogs and source safety."""
 
+import os
+from pathlib import Path
+import subprocess
+import tarfile
+import tempfile
 import unittest
 
 import package
@@ -19,6 +24,76 @@ class PackagingTests(unittest.TestCase):
         self.assertEqual(package.module_rpm_version('v0.0.0-20260214004413-d219187c3433'),
                          '0.0.0.20260214004413.d219187c3433')
         self.assertEqual(package.module_rpm_version('v2.0.0+incompatible'), '2.0.0.incompatible')
+
+    def test_git_changelog_preserves_release_ranges_and_escapes_macros(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory)
+            env = dict(os.environ, GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull,
+                       GIT_AUTHOR_DATE='2026-01-03T12:00:00Z', GIT_COMMITTER_DATE='2026-01-03T12:00:00Z')
+
+            def git(*args):
+                return subprocess.run(['git', '-c', 'user.name=Test Maintainer', '-c',
+                                       'user.email=test@example.test', *args], cwd=source,
+                                      env=env, check=True, capture_output=True, text=True).stdout
+
+            git('init', '-b', 'main')
+            (source / 'VERSION').write_text('0.1.0-dev\n')
+            git('add', 'VERSION')
+            git('commit', '-m', 'feat: first release')
+            git('tag', 'v1.0.0')
+            git('commit', '--allow-empty', '-m', 'fix: escape %{lua:os.execute("false")} and 100% values')
+            git('tag', '-a', 'v1.1.0', '-m', 'Second release')
+            self.assertEqual(package.resolve_version(source), '1.1.0')
+            git('tag', 'v1.1.1')  # Another release of the same source is valid.
+            git('commit', '--allow-empty', '-m', 'feat: latest change')
+            text = package.changelog(source, '1.2.0-rc.1')
+            self.assertIn('* Sat Jan 03 2026 Test Maintainer <test@example.test> - 1.2.0~rc.1-1', text)
+            self.assertIn(' - 1.1.0-1', text)
+            self.assertIn(' - 1.0.0-1', text)
+            self.assertIn('%%{lua:os.execute("false")} and 100%% values', text)
+            self.assertEqual(text.count('- feat: latest change'), 1)
+            self.assertEqual(text.count('- feat: first release'), 1)
+            self.assertLess(text.index('latest change'), text.index('100%%'))
+            self.assertLess(text.index('100%%'), text.index('first release'))
+
+    def test_source_allowlist_excludes_local_secrets_and_build_outputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source, target = Path(directory) / 'src', Path(directory) / 'stage'
+            source.mkdir()
+            target.mkdir()
+            for name in package.SOURCE_ROOT_FILES:
+                (source / name).write_text('source fixture\n')
+            for name in ('internal/config/config.go', 'packaging/systemd/sylvad.service.in',
+                         'scripts/package.py', '.env', '.sylva/config', 'bin/sylva',
+                         'internal/config/private.key', 'docs/private.pem', 'dist/old.rpm',
+                         'scripts/__pycache__/package.pyc'):
+                path = source / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(name)
+            package.copy_sources(source, target)
+            self.assertTrue((target / 'internal/config/config.go').is_file())
+            self.assertTrue((target / 'packaging/systemd/sylvad.service.in').is_file())
+            for name in ('.env', '.sylva', 'bin', 'dist', 'internal/config/private.key', 'docs/private.pem', 'scripts/__pycache__'):
+                self.assertFalse((target / name).exists(), name)
+            (source / 'internal/config/link.go').symlink_to(source / '.env')
+            with self.assertRaises(ValueError):
+                package.copy_sources(source, target)
+
+    def test_source_archive_is_reproducible_and_keeps_versioned_root(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            stage = root / 'sylva-1.2.3'
+            stage.mkdir()
+            path = stage / 'VERSION'
+            path.write_text('1.2.3\n')
+            first, second = root / 'first.tar.gz', root / 'second.tar.gz'
+            package.source_archive(stage, first, 1760000000)
+            os.utime(path, (1770000000, 1770000000))
+            package.source_archive(stage, second, 1760000000)
+            self.assertEqual(first.read_bytes(), second.read_bytes())
+            with tarfile.open(first) as archive:
+                self.assertEqual(archive.extractfile('sylva-1.2.3/VERSION').read(), b'1.2.3\n')
+                self.assertEqual(archive.getmember('sylva-1.2.3/VERSION').uid, 0)
 
 
 if __name__ == '__main__':

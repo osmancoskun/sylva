@@ -4,6 +4,9 @@ BUILD_DIR := bin
 GO ?= go
 MESON ?= meson
 PYTHON ?= python3
+RPMBUILD ?= rpmbuild
+RPMBUILD_FLAGS ?=
+DIST_DIR ?= dist
 VERSION ?= $(shell $(PYTHON) scripts/package.py version)
 PREFIX ?= /usr
 # Isolated BuildKit cannot resolve proxy.golang.org on this host; classic
@@ -16,9 +19,9 @@ BENCHTIME ?= 2s
 PROFILE_DIR ?= .profiles
 COVERAGE_DIR ?= .coverage
 
-.PHONY: all build build-cli build-daemon meson-setup install packaging-test test vet check analyze security coverage fuzz bench profile-memory clean docker-test docker-smoke docker-e2e docker-down
+.PHONY: all build build-cli build-daemon meson-setup install package sources rpm changelog packaging-test test vet check analyze security coverage fuzz bench profile-memory clean docker-test docker-smoke docker-e2e docker-down
 
-all: build
+all: rpm
 
 meson-setup:
 	@if [ -f "$(BUILD_DIR)/meson-private/coredata.dat" ]; then \
@@ -41,6 +44,17 @@ install: build
 
 packaging-test:
 	$(PYTHON) scripts/test_packaging.py
+
+changelog:
+	$(PYTHON) scripts/package.py changelog --version="$(VERSION)"
+
+sources:
+	$(PYTHON) scripts/package.py sources --go="$(GO)" --version="$(VERSION)" --dist-dir="$(DIST_DIR)"
+
+package: rpm
+
+rpm: build packaging-test
+	$(PYTHON) scripts/package.py rpm --go="$(GO)" --rpmbuild="$(RPMBUILD)" --rpmbuild-flags="$(RPMBUILD_FLAGS)" --version="$(VERSION)" --dist-dir="$(DIST_DIR)"
 
 test:
 	$(GO) test -race -count=1 -timeout=5m -cover ./...

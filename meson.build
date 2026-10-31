@@ -47,6 +47,9 @@ install_data('packaging/sylvad.conf', install_dir: get_option('sysconfdir') / 's
 install_data('packaging/sylvad.env', install_dir: get_option('sysconfdir') / 'sysconfig', rename: 'sylvad', install_mode: 'rw-------')
 install_emptydir(get_option('localstatedir') / 'lib/sylva', install_mode: 'rwx------')
 install_data('LICENSE', install_dir: get_option('datadir') / 'licenses/sylva')
-install_data('README.md', install_dir: get_option('datadir') / 'doc/sylva')
+if import('fs').exists('THIRD_PARTY_LICENSES')
+  install_data('THIRD_PARTY_LICENSES', install_dir: get_option('datadir') / 'licenses/sylva')
+endif
+install_data('README.md', 'docs/packaging.md', install_dir: get_option('datadir') / 'doc/sylva')
 
 test('packaging', python, args: [files('scripts/test_packaging.py')], timeout: 60)

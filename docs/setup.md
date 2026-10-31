@@ -17,7 +17,8 @@ Linux is the supported desktop: native X11/Wayland clipboard and the kernel keyr
 
 You need Go 1.26.10 (the minimum version in `go.mod`), `make`, Python 3,
 Meson >= 1.3 and Ninja. `make build` delegates compilation to Meson.
-Docker is only for tests.
+For Fedora RPMs and the packaged systemd service, see [packaging](packaging.md).
+Docker is used for isolated verification.
 
 ```bash
 cp .env.example .env
