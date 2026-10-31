@@ -62,6 +62,83 @@ shell history and process arguments. `list` prints identifiers and types;
 use `delete <id> <type> --yes`. Otherwise deletion waits for approval, with
 a fresh network deadline after you answer.
 
+## Work and personal profiles
+
+Existing commands keep their usual syntax: `sylva set github.com`,
+`sylva get github.com`, and the `sylva github.com` shorthand still work. Profile
+management is optional. Until you explicitly select another profile, commands
+continue using `default`. After `sylva switch work`, that selection stays active
+until you explicitly switch again; daily commands require no profile flag or type
+argument unless you need to disambiguate multiple secret types.
+
+Profiles separate accounts within the same vault backend. They share one master
+passphrase, SSH unlock registration and session agent. Creating or switching a
+profile does not change the server, SQLite database, Git repository or branch.
+Existing records remain in the built-in `default` profile without re-encryption.
+
+```bash
+./bin/sylva unlock
+./bin/sylva profile create personal
+./bin/sylva profile create work
+./bin/sylva profile list
+./bin/sylva profile current
+
+./bin/sylva switch personal
+./bin/sylva set github.com --username personal@example.com
+
+./bin/sylva switch work
+./bin/sylva set github.com --username employee@example.com
+./bin/sylva get github.com
+./bin/sylva list
+
+./bin/sylva switch personal
+./bin/sylva get github.com
+./bin/sylva switch default
+```
+
+`set` prompts for the password. The username field may contain an email address;
+username support currently belongs to domain/login records. `get` continues to
+copy the password. The same identifier and type may exist independently in each
+profile, including separate domain inheritance trees, environment bundles and SSH
+records. Ordinary secret lists never include the encrypted profile descriptors.
+
+`switch <name>` (also `profile use <name>`) verifies that the profile exists before
+saving `profile=<name>` in the local `.sylva/config`. Selection is local to this
+working directory/device; switching on A does not switch B. Profile names use
+1–64 lowercase letters, digits, hyphens or underscores. `SYLVA_PROFILE` overrides
+the saved selection; `--profile` before the command overrides it for one command.
+Unset a conflicting `SYLVA_PROFILE` before using `switch`. Unknown profiles fail
+instead of being created implicitly or falling back to another profile.
+
+An unlocked session can switch profiles without re-entering the master passphrase.
+Switching clears the agent-owned clipboard while retaining the root session key.
+Use `sylva profile current` to inspect the selection; ordinary command output
+keeps its existing format. `sylva lock` closes access
+to every profile in that session. A registered SSH key unlocks the same root vault
+and can be used with any of its profiles; register separately on each device.
+
+Profile descriptors (names and random IDs) are encrypted root records. Each named
+profile derives its own encryption and blind-index keys from the root key and
+random profile ID; authenticated record data binds ciphertext to that profile.
+The default profile preserves the legacy key/index format. Opaque profile IDs
+and record grouping are visible to storage, but profile names, usernames and
+passwords remain encrypted. Profiles organize one person's accounts: backend
+credentials and the root master key still grant access to the entire vault.
+
+`passwd`, `backup` and `restore` always cover **all profiles**, even when a named
+profile or `--profile` is selected. Rotation re-encrypts the profile catalog and
+all records atomically, invalidating old root sessions and SSH registrations.
+Backups preserve the complete catalog and profile bindings; restoring an older
+backup without profiles creates only `default`. The local active selection is
+not part of a backup. After changing backends or restoring a vault without the
+saved profile, use `sylva switch default` to recover the local selection.
+
+Upgrade `sylvad` and all clients before creating profiles. SQLite adds an indexed
+`profile_id` column automatically without changing existing envelopes. Git keeps
+default records in `records/` and named-profile records in
+`profiles/<opaque-id>/records/` within the same branch. Profile creation does not
+move existing default records. Older clients cannot safely manage profiled vaults.
+
 ## Unlock using an SSH agent
 
 The master passphrase remains the vault's recovery and normal unlock method.
@@ -188,15 +265,17 @@ vault. Use separate working directories or override agent/cache paths when
 working with multiple vaults.
 
 The selected branch contains `vault.json` for the format marker, salt, KDF
-parameters, key verifier, revision/generation and an ID-to-blind-index map.
-Each encrypted record is a separate `records/<blind-index>.json` file. File names
+parameters, key verifier, revision/generation, an ID-to-blind-index map and
+opaque record-to-profile mappings.
+Each default-profile encrypted record is a separate `records/<blind-index>.json`
+file; named profiles use `profiles/<opaque-id>/records/<blind-index>.json`. File names
 never contain plaintext identifiers. Record types, versions, timestamps, sizes
 and blind indexes remain visible as in self-hosted storage; secret values and
 identifiers stay encrypted. Commit messages contain no secret identifiers.
 
 Each CLI command fetches the live branch once, then verifies the key and reads
-records from that same commit. Single-record reads decode only the requested
-record; listing and domain-tree resolution may read multiple records. Writes
+records from that same commit. Named-profile commands also read the encrypted profile descriptor.
+Single-record reads decode the requested record; listing and domain-tree resolution may read multiple records. Writes
 reuse unchanged Git blobs and publish one commit only if the fetched branch tip
 is still current. A concurrent branch update or stale record edit fails: fetch
 the latest state and review before retrying. No merge, rebase, automatic conflict

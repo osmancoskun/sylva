@@ -40,6 +40,7 @@ type Vault struct {
 	remote    Backend
 	cache     storage.Store
 	masterKey []byte
+	profileID string
 }
 
 // Open constructs a Vault client. Unlock must be called before secret operations.
@@ -134,7 +135,7 @@ func (v *Vault) Unlock(ctx context.Context, passphrase string) error {
 	if err := v.verifyKey(ctx, key, true); err != nil {
 		return err
 	}
-	return v.installKey(key)
+	return v.finishUnlock(ctx, key)
 }
 
 // UnlockWithKey verifies an agent key against this server before installing it.
@@ -144,7 +145,7 @@ func (v *Vault) UnlockWithKey(ctx context.Context, key []byte) error {
 	if err := v.verifyKey(ctx, key, false); err != nil {
 		return err
 	}
-	return v.installKey(key)
+	return v.finishUnlock(ctx, key)
 }
 
 func (v *Vault) clearMasterKey() {
@@ -490,6 +491,9 @@ func (v *Vault) DeleteSecret(ctx context.Context, secretType vault.SecretType, i
 	if err := v.requireUnlocked(); err != nil {
 		return err
 	}
+	if secretType == vault.SecretTypeProfile {
+		return errors.New("profiles cannot be deleted through secret commands")
+	}
 	if secretType == vault.SecretTypeLogin {
 		norm, err := tree.NormalizeDomain(identifier)
 		if err != nil {
@@ -529,6 +533,9 @@ func (v *Vault) UpdateSecret(ctx context.Context, item *vault.SecretItem) error 
 	}
 	if item.ID == "" || item.Version <= 0 {
 		return errors.New("read the secret before updating it; its ID and version are required")
+	}
+	if item.ProfileID != v.profileID || item.Type == vault.SecretTypeProfile {
+		return errors.New("cannot update a record from another profile")
 	}
 	if item.Type == vault.SecretTypeLogin {
 		norm, err := tree.NormalizeDomain(item.Identifier)
@@ -604,6 +611,13 @@ func (v *Vault) createRecord(ctx context.Context, item *vault.SecretItem) error 
 	if item == nil {
 		return errors.New("secret item is required")
 	}
+	if item.Type == vault.SecretTypeProfile {
+		return errors.New("use CreateProfile to create a profile")
+	}
+	if item.ProfileID != "" && item.ProfileID != v.profileID {
+		return errors.New("record belongs to another profile")
+	}
+	item.ProfileID = v.profileID
 	exists, err := v.SecretExists(ctx, item.Type, item.Identifier)
 	if err != nil {
 		return err
@@ -671,28 +685,32 @@ func (v *Vault) cacheReplace(ctx context.Context, rec *vault.EncryptedRecord) {
 }
 
 func (v *Vault) listRecords(ctx context.Context, secretType vault.SecretType) ([]*vault.EncryptedRecord, error) {
-	recs, err := v.remote.ListRecords(ctx, secretType)
+	recs, err := v.remote.ListProfileRecords(ctx, v.profileID, secretType)
 	if err == nil {
 		if v.cache != nil {
-			if err := v.cache.ReplaceRecords(ctx, secretType, recs); err != nil {
+			if err := v.cache.ReplaceProfileRecords(ctx, v.profileID, secretType, recs); err != nil {
 				v.disableCache()
 			}
 		}
-		return recs, nil
+		return v.filterProfileRecords(recs), nil
 	}
 	if v.cache == nil || !canReadCache(ctx, err) {
 		return nil, err
 	}
-	return v.cache.List(ctx, secretType)
+	cached, cacheErr := v.cache.ListProfile(ctx, v.profileID, secretType)
+	return v.filterProfileRecords(cached), cacheErr
 }
 
 func (v *Vault) getByIdentifier(ctx context.Context, secretType vault.SecretType, identifier string) (*vault.EncryptedRecord, error) {
-	idx, err := vault.LookupBlindIndex(v.masterKey, secretType, identifier)
+	idx, err := vault.LookupProfileBlindIndex(v.masterKey, v.profileID, secretType, identifier)
 	if err != nil {
 		return nil, err
 	}
 	rec, err := v.remote.GetRecordByBlindIndex(ctx, idx)
 	if err == nil {
+		if rec.ProfileID != v.profileID || rec.BlindIndex != idx {
+			return nil, errors.New("record belongs to another profile or identifier")
+		}
 		v.cacheReplace(ctx, rec)
 		return rec, nil
 	}
@@ -703,7 +721,11 @@ func (v *Vault) getByIdentifier(ctx context.Context, secretType vault.SecretType
 	if v.cache == nil || !canReadCache(ctx, err) {
 		return nil, err
 	}
-	return v.cache.GetByBlindIndex(ctx, idx)
+	cached, cacheErr := v.cache.GetByBlindIndex(ctx, idx)
+	if cacheErr == nil && (cached.ProfileID != v.profileID || cached.BlindIndex != idx) {
+		return nil, errors.New("cached record belongs to another profile or identifier")
+	}
+	return cached, cacheErr
 }
 
 func (v *Vault) cacheSalt(ctx context.Context, salt []byte) {

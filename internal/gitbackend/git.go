@@ -32,6 +32,7 @@ type document struct {
 	Format   string            `json:"format"`
 	Snapshot *vault.Snapshot   `json:"snapshot"`
 	Index    map[string]string `json:"index"`
+	Profiles map[string]string `json:"profiles,omitempty"`
 }
 
 type Client struct {
@@ -134,7 +135,7 @@ func (c *Client) validate(s *vault.Snapshot) error {
 	}
 	ids, indexes := map[string]bool{}, map[string]bool{}
 	for _, rec := range s.Records {
-		if rec == nil || rec.ID == "" || rec.BlindIndex == "" || rec.Type == "" || rec.Version < 1 || len(rec.Envelope.Nonce) != 12 || len(rec.Envelope.Ciphertext) < 16 || ids[rec.ID] || indexes[rec.BlindIndex] {
+		if rec == nil || rec.ID == "" || rec.BlindIndex == "" || rec.Type == "" || !vault.ValidProfileID(rec.ProfileID) || rec.Version < 1 || len(rec.Envelope.Nonce) != 12 || len(rec.Envelope.Ciphertext) < 16 || ids[rec.ID] || indexes[rec.BlindIndex] {
 			return errors.New("invalid or duplicate Git vault record")
 		}
 		raw, err := json.Marshal(rec)

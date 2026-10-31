@@ -21,8 +21,9 @@ import (
 )
 
 type entry struct {
-	object string
-	size   int64
+	object  string
+	size    int64
+	profile string
 }
 
 // A view is an immutable remote commit plus lazily decoded record blobs.
@@ -217,13 +218,23 @@ func (c *Client) fetch(ctx context.Context, directory string) (*view, error) {
 		if id == "" || !validIndex(index) {
 			return nil, errors.New("invalid Git vault record index")
 		}
-		path := recordPath(index)
+		profile := doc.Profiles[index]
+		if !vault.ValidProfileID(profile) {
+			return nil, errors.New("invalid Git profile ID")
+		}
+		path := profileRecordPath(index, profile)
 		file, ok := files[path]
 		if !ok || file.size > c.cfg.MaxBodyBytes {
 			return nil, errors.New("missing, duplicate or oversized Git vault record")
 		}
+		file.profile = profile
 		v.files[index] = file
 		delete(files, path)
+	}
+	for index, profile := range doc.Profiles {
+		if _, ok := v.files[index]; !ok || profile == "" {
+			return nil, errors.New("invalid Git profile mapping")
+		}
 	}
 	if len(files) != 0 {
 		return nil, errors.New("git vault branch contains unrelated files")
@@ -266,7 +277,7 @@ func (c *Client) record(ctx context.Context, v *view, index string) (*vault.Encr
 	if err := c.decodeBlob(ctx, v.directory, file, &rec); err != nil {
 		return nil, err
 	}
-	if rec.BlindIndex != index || v.index[rec.ID] != index {
+	if rec.BlindIndex != index || v.index[rec.ID] != index || rec.ProfileID != file.profile {
 		return nil, errors.New("git record does not match its index")
 	}
 	if err := c.validate(&vault.Snapshot{Records: []*vault.EncryptedRecord{&rec}}); err != nil {
@@ -368,37 +379,41 @@ func (c *Client) publish(ctx context.Context, v *view) error {
 		if err != nil {
 			return err
 		}
+		file.profile = rec.ProfileID
 		v.files[index] = file
+	}
+
+	profiles := map[string]string{}
+	paths := map[string]entry{}
+	for _, index := range sortedIndexes(v.index) {
+		file, ok := v.files[index]
+		if !ok {
+			return errors.New("missing Git record blob")
+		}
+		if file.profile != "" {
+			profiles[index] = file.profile
+		}
+		paths[profileRecordPath(index, file.profile)] = file
 	}
 	metadata := *v.meta
 	metadata.Records = nil
-	file, err := c.writeBlob(ctx, v.directory, document{Format: format, Snapshot: &metadata, Index: v.index})
+	file, err := c.writeBlob(ctx, v.directory, document{Format: format, Snapshot: &metadata, Index: v.index, Profiles: profiles})
 	if err != nil {
 		return err
 	}
 	total = file.size
-	var records strings.Builder
-	for _, index := range sortedIndexes(v.index) {
-		entry, ok := v.files[index]
-		if !ok || entry.size > c.cfg.MaxVaultBytes-total {
+	for _, file := range paths {
+		if file.size > c.cfg.MaxVaultBytes-total {
 			return &limits.SizeError{Scope: "Git vault", Setting: "max_vault_bytes", Limit: c.cfg.MaxVaultBytes}
 		}
-		total += entry.size
-		fmt.Fprintf(&records, "100644 blob %s\t%s.json\n", entry.object, index)
+		total += file.size
 	}
-	root := "100644 blob " + file.object + "\t" + metadataFile + "\n"
-	if len(v.index) != 0 {
-		tree, err := c.run(ctx, v.directory, strings.NewReader(records.String()), "mktree")
-		if err != nil {
-			return err
-		}
-		root += "040000 tree " + strings.TrimSpace(string(tree)) + "\trecords\n"
-	}
-	tree, err := c.run(ctx, v.directory, strings.NewReader(root), "mktree")
+	paths[metadataFile] = file
+	tree, err := c.writeTree(ctx, v.directory, paths)
 	if err != nil {
 		return err
 	}
-	args := []string{"commit-tree", strings.TrimSpace(string(tree))}
+	args := []string{"commit-tree", tree}
 	if v.head != "" {
 		args = append(args, "-p", v.head)
 	}

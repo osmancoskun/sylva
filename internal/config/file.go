@@ -163,7 +163,7 @@ func overlayEnv(s *settings) {
 
 func knownKeys() []string {
 	return []string{
-		"service_name", "version", "log_level", "backend", "git_remote", "git_branch", "git_timeout", "git_cache_dir",
+		"service_name", "version", "log_level", "profile", "backend", "git_remote", "git_branch", "git_timeout", "git_cache_dir",
 		"host", "port", "scheme", "api_prefix", "server_addr", "server_url",
 		"server_read_header_timeout", "server_read_timeout", "server_write_timeout",
 		"server_idle_timeout", "server_shutdown_timeout", "client_timeout", "max_body_bytes", "max_vault_bytes", "max_backup_bytes",

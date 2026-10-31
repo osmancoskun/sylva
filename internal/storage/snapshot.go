@@ -88,7 +88,7 @@ func (s *SQLiteStore) Snapshot(ctx context.Context, records bool) (*vault.Snapsh
 		}
 	}
 	if records {
-		rows, err := tx.QueryContext(ctx, `SELECT id,type,blind_index,parent_blind_index,nonce,ciphertext,version,created_at,updated_at FROM records ORDER BY id`)
+		rows, err := tx.QueryContext(ctx, `SELECT id,type,blind_index,parent_blind_index,nonce,ciphertext,version,created_at,updated_at,profile_id FROM records ORDER BY id`)
 		if err != nil {
 			return nil, err
 		}

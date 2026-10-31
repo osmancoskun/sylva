@@ -120,3 +120,9 @@ func (c *Client) roundTrip(req api.AgentRequest) (api.AgentResponse, error) {
 	}
 	return resp, nil
 }
+
+// ClearClipboard clears the owned clipboard while keeping the vault session.
+func (c *Client) ClearClipboard() error {
+	_, err := c.roundTrip(api.AgentRequest{Op: api.AgentOpClearClipboard})
+	return err
+}

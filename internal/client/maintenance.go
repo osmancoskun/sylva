@@ -68,7 +68,7 @@ func checkSnapshot(key []byte, snapshot *vault.Snapshot) ([]*vault.SecretItem, e
 		if err := item.Validate(); err != nil {
 			return nil, err
 		}
-		index, err := vault.LookupBlindIndex(key, item.Type, item.Identifier)
+		index, err := vault.LookupProfileBlindIndex(key, item.ProfileID, item.Type, item.Identifier)
 		if err != nil {
 			return nil, err
 		}
@@ -78,6 +78,22 @@ func checkSnapshot(key []byte, snapshot *vault.Snapshot) ([]*vault.SecretItem, e
 		ids[rec.ID] = true
 		indexes[rec.BlindIndex] = true
 		items = append(items, item)
+	}
+	profiles := map[string]bool{"": true}
+	names := map[string]bool{config.DefaultProfile: true}
+	for _, item := range items {
+		if item.Type != vault.SecretTypeProfile {
+			continue
+		}
+		if item.Profile == nil || profiles[item.Profile.ID] || names[item.Profile.Name] {
+			return nil, errors.New("invalid or duplicate snapshot profile")
+		}
+		profiles[item.Profile.ID], names[item.Profile.Name] = true, true
+	}
+	for _, item := range items {
+		if !profiles[item.ProfileID] {
+			return nil, errors.New("snapshot record references a missing profile")
+		}
 	}
 	return items, nil
 }

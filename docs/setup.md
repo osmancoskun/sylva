@@ -2,6 +2,10 @@
 
 Sylva is two binaries. Tunables (timeouts, Argon2id, password length, paths) ship in `internal/config/default.conf` and optional `.sylva/config`. `.env` is only host, port, and secrets (auth key, passphrase). The default self-hosted backend uses `sylvad` to store ciphertext in SQLite. The optional Git backend connects directly from `sylva` to a dedicated Git branch. `sylva` encrypts on the client and copies secrets to the clipboard. Secret values and identifiers remain encrypted in remote storage. Record IDs, types, blind indexes and parent links, versions, timestamps, and ciphertext sizes remain visible as metadata.
 
+Profiles keep work and personal accounts in the same backend using one master
+passphrase and SSH unlock session. Existing records belong to `default`.
+See [profile commands](howto.md#work-and-personal-profiles).
+
 For a vault without a daemon, follow [Git setup](howto.md#use-a-git-backed-vault).
 The daemon, HTTP TLS and Tailscale setup below applies to self-hosted storage.
 

@@ -55,6 +55,7 @@ type ServerConfig struct {
 
 // ClientConfig holds runtime configuration for the sylva CLI client.
 type ClientConfig struct {
+	Profile              string
 	Backend              string
 	GitRemote            string
 	GitBranch            string
@@ -272,6 +273,10 @@ func LoadClientConfig(envPath string) (ClientConfig, error) {
 	if err != nil {
 		return ClientConfig{}, err
 	}
+	profile, err := NormalizeProfileName(s.get("profile"))
+	if err != nil {
+		return ClientConfig{}, err
+	}
 	backend := strings.ToLower(strings.TrimSpace(s.get("backend")))
 	if backend != "self-hosted" && backend != "git" {
 		return ClientConfig{}, fmt.Errorf("backend must be self-hosted or git")
@@ -390,6 +395,7 @@ func LoadClientConfig(envPath string) (ClientConfig, error) {
 	}
 
 	return ClientConfig{
+		Profile:              profile,
 		Backend:              backend,
 		GitRemote:            s.get("git_remote"),
 		GitBranch:            s.get("git_branch"),

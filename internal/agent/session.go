@@ -296,6 +296,19 @@ func (s *Server) handle(conn net.Conn) {
 		resp = api.AgentResponse{OK: true, Unlocked: true, Key: append([]byte(nil), s.key...)}
 		s.expires = time.Now().Add(s.idleTimeout)
 		s.mu.Unlock()
+	case api.AgentOpClearClipboard:
+		s.mu.Lock()
+		s.expireLocked()
+		if s.clip != nil {
+			s.clipboardErr = s.clip.Clear()
+		}
+		s.copyType, s.copyIdentifier = "", ""
+		if err := s.cleanupErrorLocked(); err != nil {
+			resp = cleanupResponse(err)
+		} else {
+			resp = api.AgentResponse{OK: true, Unlocked: len(s.key) > 0}
+		}
+		s.mu.Unlock()
 	case api.AgentOpCopy, api.AgentOpScheduleClear:
 		s.mu.Lock()
 		s.expireLocked()

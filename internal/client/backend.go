@@ -29,6 +29,7 @@ type Backend interface {
 	UpdateRecord(context.Context, *vault.EncryptedRecord) (*vault.EncryptedRecord, error)
 	GetRecord(context.Context, string) (*vault.EncryptedRecord, error)
 	GetRecordByBlindIndex(context.Context, string) (*vault.EncryptedRecord, error)
+	ListProfileRecords(context.Context, string, vault.SecretType) ([]*vault.EncryptedRecord, error)
 	ListRecords(context.Context, vault.SecretType) ([]*vault.EncryptedRecord, error)
 	DeleteRecord(context.Context, string) error
 	Snapshot(context.Context) (*vault.Snapshot, error)

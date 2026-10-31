@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync/atomic"
 
@@ -167,12 +168,27 @@ func (c *Client) GetRecordByBlindIndex(ctx context.Context, blindIndex string) (
 
 // ListRecords lists encrypted records, optionally filtered by secret type.
 func (c *Client) ListRecords(ctx context.Context, secretType vault.SecretType) ([]*vault.EncryptedRecord, error) {
-	u := c.apiURL(api.PathRecords)
-	if secretType != "" {
-		u = c.apiURL(api.RecordsQuery(api.QuerySecretType, string(secretType)))
+	return c.listRecords(ctx, nil, secretType)
+}
+
+func (c *Client) ListProfileRecords(ctx context.Context, profile string, secretType vault.SecretType) ([]*vault.EncryptedRecord, error) {
+	return c.listRecords(ctx, &profile, secretType)
+}
+
+func (c *Client) listRecords(ctx context.Context, profile *string, kind vault.SecretType) ([]*vault.EncryptedRecord, error) {
+	query := url.Values{}
+	if kind != "" {
+		query.Set(api.QuerySecretType, string(kind))
+	}
+	if profile != nil {
+		query.Set(api.QueryProfileID, *profile)
+	}
+	path := api.PathRecords
+	if len(query) > 0 {
+		path += "?" + query.Encode()
 	}
 	var out api.RecordsBody
-	if err := c.doJSONLimit(ctx, http.MethodGet, u, nil, http.StatusOK, &out, c.maxVaultBytes, "max_vault_bytes"); err != nil {
+	if err := c.doJSONLimit(ctx, http.MethodGet, c.apiURL(path), nil, http.StatusOK, &out, c.maxVaultBytes, "max_vault_bytes"); err != nil {
 		return nil, err
 	}
 	if out.Records == nil {

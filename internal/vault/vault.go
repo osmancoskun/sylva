@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/osman/sylva/internal/config"
 	"github.com/osman/sylva/internal/crypto"
 )
 
@@ -28,6 +29,9 @@ const (
 
 	// SecretTypeToken represents API keys and personal access tokens.
 	SecretTypeToken SecretType = "token"
+
+	// SecretTypeProfile stores an encrypted profile descriptor in the root vault.
+	SecretTypeProfile SecretType = "profile"
 )
 
 const (
@@ -81,17 +85,19 @@ type TokenPayload struct {
 type SecretItem struct {
 	// Version is the authenticated source revision used for optimistic updates.
 	// It is reconstructed from the envelope rather than serialized in plaintext.
-	Version    int           `json:"-"`
-	ID         string        `json:"id"`
-	Type       SecretType    `json:"type"`
-	Identifier string        `json:"identifier"`
-	ParentID   string        `json:"parent_id,omitempty"`
-	Login      *LoginPayload `json:"login,omitempty"`
-	SSH        *SSHPayload   `json:"ssh,omitempty"`
-	Env        *EnvPayload   `json:"env,omitempty"`
-	Token      *TokenPayload `json:"token,omitempty"`
-	CreatedAt  time.Time     `json:"created_at"`
-	UpdatedAt  time.Time     `json:"updated_at"`
+	Version    int             `json:"-"`
+	ProfileID  string          `json:"profile_id,omitempty"`
+	Profile    *ProfilePayload `json:"profile,omitempty"`
+	ID         string          `json:"id"`
+	Type       SecretType      `json:"type"`
+	Identifier string          `json:"identifier"`
+	ParentID   string          `json:"parent_id,omitempty"`
+	Login      *LoginPayload   `json:"login,omitempty"`
+	SSH        *SSHPayload     `json:"ssh,omitempty"`
+	Env        *EnvPayload     `json:"env,omitempty"`
+	Token      *TokenPayload   `json:"token,omitempty"`
+	CreatedAt  time.Time       `json:"created_at"`
+	UpdatedAt  time.Time       `json:"updated_at"`
 }
 
 // Validate checks that the SecretItem has a valid type, identifier, and matching payload.
@@ -106,7 +112,18 @@ func (s *SecretItem) Validate() error {
 		return errors.New("secret identifier cannot be empty")
 	}
 
+	if !ValidProfileID(s.ProfileID) {
+		return errors.New("invalid profile ID")
+	}
 	switch s.Type {
+	case SecretTypeProfile:
+		if s.ProfileID != "" || s.Profile == nil || s.Profile.ID == "" || !ValidProfileID(s.Profile.ID) {
+			return errors.New("invalid profile descriptor")
+		}
+		name, err := config.NormalizeProfileName(s.Profile.Name)
+		if err != nil || name == config.DefaultProfile || name != s.Profile.Name || s.Identifier != ProfileIdentifier(name) {
+			return errors.New("invalid profile name or identifier")
+		}
 	case SecretTypeLogin:
 		if s.Login == nil {
 			return errors.New("login payload is required for login secret type")
@@ -152,6 +169,7 @@ func (s *SecretItem) Validate() error {
 // The server never sees the plaintext identifier or secret payload.
 type EncryptedRecord struct {
 	ID               string          `json:"id"`
+	ProfileID        string          `json:"profile_id,omitempty"`
 	Type             SecretType      `json:"type"`
 	BlindIndex       string          `json:"blind_index"`
 	ParentBlindIndex string          `json:"parent_blind_index,omitempty"`
@@ -174,13 +192,18 @@ func Seal(masterKey []byte, item *SecretItem, version int) (*EncryptedRecord, er
 		version = 1
 	}
 
-	encKey, err := crypto.DeriveSubkey(masterKey, subkeyPurposeEncryption)
+	key, err := profileKey(masterKey, item.ProfileID)
+	if err != nil {
+		return nil, err
+	}
+	defer crypto.ZeroBytes(key)
+	encKey, err := crypto.DeriveSubkey(key, subkeyPurposeEncryption)
 	if err != nil {
 		return nil, err
 	}
 	defer crypto.ZeroBytes(encKey)
 
-	idxKey, err := crypto.DeriveSubkey(masterKey, subkeyPurposeBlindIndex)
+	idxKey, err := crypto.DeriveSubkey(key, subkeyPurposeBlindIndex)
 	if err != nil {
 		return nil, err
 	}
@@ -211,7 +234,7 @@ func Seal(masterKey []byte, item *SecretItem, version int) (*EncryptedRecord, er
 	}
 	defer crypto.ZeroBytes(plaintext)
 
-	aad := buildAAD(item.ID, item.Type, blindIdx, version)
+	aad := profileAAD(item.ProfileID, item.ID, item.Type, blindIdx, version)
 	env, err := crypto.Encrypt(encKey, plaintext, aad)
 	if err != nil {
 		return nil, fmt.Errorf("encrypt secret item: %w", err)
@@ -219,6 +242,7 @@ func Seal(masterKey []byte, item *SecretItem, version int) (*EncryptedRecord, er
 
 	return &EncryptedRecord{
 		ID:               item.ID,
+		ProfileID:        item.ProfileID,
 		Type:             item.Type,
 		BlindIndex:       blindIdx,
 		ParentBlindIndex: parentBlindIdx,
@@ -235,13 +259,18 @@ func Unseal(masterKey []byte, rec *EncryptedRecord) (*SecretItem, error) {
 		return nil, errors.New("encrypted record cannot be nil")
 	}
 
-	encKey, err := crypto.DeriveSubkey(masterKey, subkeyPurposeEncryption)
+	key, err := profileKey(masterKey, rec.ProfileID)
+	if err != nil {
+		return nil, err
+	}
+	defer crypto.ZeroBytes(key)
+	encKey, err := crypto.DeriveSubkey(key, subkeyPurposeEncryption)
 	if err != nil {
 		return nil, err
 	}
 	defer crypto.ZeroBytes(encKey)
 
-	aad := buildAAD(rec.ID, rec.Type, rec.BlindIndex, rec.Version)
+	aad := profileAAD(rec.ProfileID, rec.ID, rec.Type, rec.BlindIndex, rec.Version)
 	plaintext, err := crypto.Decrypt(encKey, &rec.Envelope, aad)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt record %s: %w", rec.ID, err)
@@ -251,6 +280,9 @@ func Unseal(masterKey []byte, rec *EncryptedRecord) (*SecretItem, error) {
 	var item SecretItem
 	if err := json.Unmarshal(plaintext, &item); err != nil {
 		return nil, fmt.Errorf("unmarshal decrypted item: %w", err)
+	}
+	if item.ProfileID != rec.ProfileID || item.ID != rec.ID || item.Type != rec.Type {
+		return nil, errors.New("decrypted record identity mismatch")
 	}
 	item.Version = rec.Version
 

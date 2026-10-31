@@ -38,6 +38,8 @@ type Store interface {
 	GetByID(ctx context.Context, id string) (*vault.EncryptedRecord, error)
 	GetByBlindIndex(ctx context.Context, blindIndex string) (*vault.EncryptedRecord, error)
 	List(ctx context.Context, secretType vault.SecretType) ([]*vault.EncryptedRecord, error)
+	ListProfile(ctx context.Context, profile string, secretType vault.SecretType) ([]*vault.EncryptedRecord, error)
+	ReplaceProfileRecords(ctx context.Context, profile string, secretType vault.SecretType, records []*vault.EncryptedRecord) error
 	Delete(ctx context.Context, id string) error
 	PutMetadata(ctx context.Context, key string, value []byte) error
 	CreateMetadata(ctx context.Context, key string, value []byte) error // insert-only, atomic

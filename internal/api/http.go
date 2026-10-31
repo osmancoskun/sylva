@@ -27,6 +27,7 @@ const (
 const (
 	QueryBlindIndex = "blind_index"
 	QuerySecretType = "type"
+	QueryProfileID  = "profile_id"
 	ParamID         = "id"
 )
 

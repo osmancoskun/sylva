@@ -89,9 +89,25 @@ func (c *Client) PutKeyCheck(ctx context.Context, check *crypto.Envelope) error 
 }
 
 func (c *Client) ListRecords(ctx context.Context, kind vault.SecretType) ([]*vault.EncryptedRecord, error) {
+	return c.listRecords(ctx, nil, kind)
+}
+
+func (c *Client) ListProfileRecords(ctx context.Context, profile string, kind vault.SecretType) ([]*vault.EncryptedRecord, error) {
+	return c.listRecords(ctx, &profile, kind)
+}
+
+func (c *Client) listRecords(ctx context.Context, profile *string, kind vault.SecretType) ([]*vault.EncryptedRecord, error) {
 	out := []*vault.EncryptedRecord{}
 	err := c.withView(ctx, false, func(ctx context.Context, v *view) error {
 		for _, index := range sortedIndexes(v.index) {
+			if profile != nil {
+				if file, ok := v.files[index]; ok && file.profile != *profile {
+					continue
+				}
+				if rec, ok := v.loaded[index]; ok && rec.ProfileID != *profile {
+					continue
+				}
+			}
 			rec, err := c.record(ctx, v, index)
 			if err != nil {
 				return err
@@ -174,7 +190,7 @@ func (c *Client) UpdateRecord(ctx context.Context, rec *vault.EncryptedRecord) (
 		if err != nil {
 			return err
 		}
-		if rec.Version <= 1 || old.Version != rec.Version-1 {
+		if rec.Version <= 1 || old.Version != rec.Version-1 || old.ProfileID != rec.ProfileID {
 			return storage.ErrVersionConflict
 		}
 		if rec.BlindIndex != index {

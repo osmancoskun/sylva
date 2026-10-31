@@ -2,12 +2,13 @@ package api
 
 // Agent protocol operations served over the local unix socket.
 const (
-	AgentOpStatus        = "status"
-	AgentOpUnlock        = "unlock"
-	AgentOpLock          = "lock"
-	AgentOpMasterKey     = "master-key"
-	AgentOpCopy          = "copy"
-	AgentOpScheduleClear = "schedule-clear"
+	AgentOpStatus         = "status"
+	AgentOpClearClipboard = "clear-clipboard"
+	AgentOpUnlock         = "unlock"
+	AgentOpLock           = "lock"
+	AgentOpMasterKey      = "master-key"
+	AgentOpCopy           = "copy"
+	AgentOpScheduleClear  = "schedule-clear"
 )
 
 // AgentRequest is the local session-agent request envelope.
@@ -39,5 +40,6 @@ func AgentOps() []string {
 		AgentOpMasterKey,
 		AgentOpCopy,
 		AgentOpScheduleClear,
+		AgentOpClearClipboard,
 	}
 }

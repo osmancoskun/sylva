@@ -18,7 +18,7 @@ func (s *Server) handlePutRecord(w http.ResponseWriter, r *http.Request) {
 	if !readRequestJSON(w, r, &rec, s.cfg.MaxBodyBytes, "max_body_bytes") {
 		return
 	}
-	if rec.ID == "" || rec.BlindIndex == "" || rec.Type == "" {
+	if rec.ID == "" || rec.BlindIndex == "" || rec.Type == "" || !vault.ValidProfileID(rec.ProfileID) {
 		writeJSON(w, http.StatusBadRequest, api.ErrorBody{Error: "record id, type, and blind_index are required"})
 		return
 	}
@@ -49,7 +49,7 @@ func (s *Server) handleUpdateRecord(w http.ResponseWriter, r *http.Request) {
 	if rec.ID == "" {
 		rec.ID = id
 	}
-	if rec.ID != id || rec.BlindIndex == "" || rec.Type == "" {
+	if rec.ID != id || rec.BlindIndex == "" || rec.Type == "" || !vault.ValidProfileID(rec.ProfileID) {
 		writeJSON(w, http.StatusBadRequest, api.ErrorBody{Error: "record id, type, and blind_index are required"})
 		return
 	}
@@ -116,7 +116,18 @@ func (s *Server) handleListRecords(w http.ResponseWriter, r *http.Request) {
 	if raw := q.Get(api.QuerySecretType); raw != "" {
 		secretType = vault.SecretType(raw)
 	}
-	recs, err := s.store.List(r.Context(), secretType)
+	var recs []*vault.EncryptedRecord
+	var err error
+	if q.Has(api.QueryProfileID) {
+		profile := q.Get(api.QueryProfileID)
+		if !vault.ValidProfileID(profile) {
+			writeJSON(w, http.StatusBadRequest, api.ErrorBody{Error: "invalid profile ID"})
+			return
+		}
+		recs, err = s.store.ListProfile(r.Context(), profile, secretType)
+	} else {
+		recs, err = s.store.List(r.Context(), secretType)
+	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, api.ErrorBody{Error: "failed to list records"})
 		return

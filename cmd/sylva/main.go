@@ -14,6 +14,7 @@ import (
 )
 
 func main() {
+	profileOverride := flag.String("profile", "", "use a profile for this command without changing the saved selection")
 	envFile := flag.String("env", ".env", "path to environment configuration file")
 	serverOverride := flag.String("server", "", "override base URL of the sylvad server")
 	timeoutOverride := flag.Duration("timeout", 0, "override request timeout duration")
@@ -23,14 +24,16 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Commands:\n")
 		fmt.Fprintf(os.Stderr, "  ping                 Check connectivity and status of the sylvad server\n")
 		fmt.Fprintf(os.Stderr, "  version              Print client version information\n")
+		fmt.Fprintf(os.Stderr, "  profile create|list|current|use  Manage profiles in the connected vault\n")
+		fmt.Fprintf(os.Stderr, "  switch <profile>     Select the active profile on this device\n")
 		fmt.Fprintf(os.Stderr, "  init                 Initialize the vault salt on the server\n")
 		fmt.Fprintf(os.Stderr, "  unlock [--ssh]       Unlock with the master passphrase or a registered SSH key\n")
 		fmt.Fprintf(os.Stderr, "  ssh add <pubkey>     Register an Ed25519 SSH agent key using the master passphrase\n")
 		fmt.Fprintf(os.Stderr, "  ssh status|remove    Inspect or remove this device's SSH unlock registration\n")
 		fmt.Fprintf(os.Stderr, "  lock                 Wipe the session agent / OS keyring\n")
-		fmt.Fprintf(os.Stderr, "  passwd               Change the master passphrase atomically\n")
-		fmt.Fprintf(os.Stderr, "  backup <file>        Write an encrypted vault backup\n")
-		fmt.Fprintf(os.Stderr, "  restore <file>       Restore into an uninitialized vault\n")
+		fmt.Fprintf(os.Stderr, "  passwd               Change the master passphrase for all profiles atomically\n")
+		fmt.Fprintf(os.Stderr, "  backup <file>        Write an encrypted backup of all profiles\n")
+		fmt.Fprintf(os.Stderr, "  restore <file>       Restore all profiles into an uninitialized vault\n")
 		fmt.Fprintf(os.Stderr, "  agent                Run the local session agent (foreground)\n")
 		fmt.Fprintf(os.Stderr, "  cert init [--add-tailscale] [--host DNS-or-IP]\n")
 		fmt.Fprintf(os.Stderr, "                       Create local CA and mTLS certificate pairs\n")
@@ -76,6 +79,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	if *profileOverride != "" {
+		cfg.Profile, err = config.NormalizeProfileName(*profileOverride)
+		if err != nil {
+			fatal(err)
+		}
+	}
 	if *serverOverride != "" {
 		if cfg.Backend == "git" {
 			fatal(fmt.Errorf("--server applies to the self-hosted backend; configure git_remote for Git"))
@@ -87,6 +96,17 @@ func main() {
 	}
 
 	switch cmd {
+	case "profile":
+		if err := runProfile(cfg, args[1:]); err != nil {
+			fatal(err)
+		}
+	case "switch":
+		if len(args) != 2 {
+			fatal(fmt.Errorf("usage: sylva switch <profile>"))
+		}
+		if err := runSwitch(cfg, args[1]); err != nil {
+			fatal(err)
+		}
 	case "ping", "status":
 		if err := runPing(cfg); err != nil {
 			fatal(err)

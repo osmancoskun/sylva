@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS records (
 	ciphertext BLOB NOT NULL,
 	version INTEGER NOT NULL,
 	created_at TEXT NOT NULL,
-	updated_at TEXT NOT NULL
+	updated_at TEXT NOT NULL,
+	profile_id TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_records_type ON records(type);
 
@@ -73,6 +74,10 @@ func OpenSQLite(path string, busyTimeout time.Duration) (*SQLiteStore, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate sqlite schema: %w", err)
 	}
+	if err := migrateProfiles(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	for _, table := range []string{"records", "metadata"} {
 		for _, operation := range []string{"INSERT", "UPDATE", "DELETE"} {
 			q := fmt.Sprintf(`CREATE TRIGGER IF NOT EXISTS revision_%s_%s AFTER %s ON %s BEGIN UPDATE vault_state SET revision=revision+1 WHERE id=1; END`, table, operation, operation, table)
@@ -114,9 +119,9 @@ func (s *SQLiteStore) Put(ctx context.Context, rec *vault.EncryptedRecord) error
 
 	_, err := s.execGuarded(ctx, `
 		INSERT INTO records (
-			id, type, blind_index, parent_blind_index, nonce, ciphertext, version, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, rec.ID, string(rec.Type), rec.BlindIndex, rec.ParentBlindIndex, rec.Envelope.Nonce, rec.Envelope.Ciphertext, rec.Version, rec.CreatedAt.UTC().Format(time.RFC3339Nano), rec.UpdatedAt.UTC().Format(time.RFC3339Nano))
+			id, type, blind_index, parent_blind_index, nonce, ciphertext, version, created_at, updated_at, profile_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, rec.ID, string(rec.Type), rec.BlindIndex, rec.ParentBlindIndex, rec.Envelope.Nonce, rec.Envelope.Ciphertext, rec.Version, rec.CreatedAt.UTC().Format(time.RFC3339Nano), rec.UpdatedAt.UTC().Format(time.RFC3339Nano), rec.ProfileID)
 	if err != nil {
 		if isUniqueConstraint(err) {
 			return fmt.Errorf("%w: record already exists", ErrConflict)
@@ -146,8 +151,8 @@ func (s *SQLiteStore) Update(ctx context.Context, rec *vault.EncryptedRecord) er
 			ciphertext=?,
 			version=?,
 			updated_at=?
-		WHERE id=? AND version=?
-	`, string(rec.Type), rec.BlindIndex, rec.ParentBlindIndex, rec.Envelope.Nonce, rec.Envelope.Ciphertext, rec.Version, rec.UpdatedAt.UTC().Format(time.RFC3339Nano), rec.ID, rec.Version-1)
+		WHERE id=? AND version=? AND profile_id=?
+	`, string(rec.Type), rec.BlindIndex, rec.ParentBlindIndex, rec.Envelope.Nonce, rec.Envelope.Ciphertext, rec.Version, rec.UpdatedAt.UTC().Format(time.RFC3339Nano), rec.ID, rec.Version-1, rec.ProfileID)
 	if err != nil {
 		if isUniqueConstraint(err) {
 			return fmt.Errorf("%w: record already exists", ErrConflict)
@@ -178,7 +183,7 @@ func isUniqueConstraint(err error) bool {
 // GetByID loads a record by its client-generated identifier.
 func (s *SQLiteStore) GetByID(ctx context.Context, id string) (*vault.EncryptedRecord, error) {
 	return s.scanOne(s.db.QueryRowContext(ctx, `
-		SELECT id, type, blind_index, parent_blind_index, nonce, ciphertext, version, created_at, updated_at
+		SELECT id, type, blind_index, parent_blind_index, nonce, ciphertext, version, created_at, updated_at, profile_id
 		FROM records WHERE id = ?
 	`, id))
 }
@@ -186,33 +191,36 @@ func (s *SQLiteStore) GetByID(ctx context.Context, id string) (*vault.EncryptedR
 // GetByBlindIndex loads a record by its HMAC blind index.
 func (s *SQLiteStore) GetByBlindIndex(ctx context.Context, blindIndex string) (*vault.EncryptedRecord, error) {
 	return s.scanOne(s.db.QueryRowContext(ctx, `
-		SELECT id, type, blind_index, parent_blind_index, nonce, ciphertext, version, created_at, updated_at
+		SELECT id, type, blind_index, parent_blind_index, nonce, ciphertext, version, created_at, updated_at, profile_id
 		FROM records WHERE blind_index = ?
 	`, blindIndex))
 }
 
 // List returns all records, optionally filtered by secret type.
-func (s *SQLiteStore) List(ctx context.Context, secretType vault.SecretType) ([]*vault.EncryptedRecord, error) {
-	var (
-		rows *sql.Rows
-		err  error
-	)
-	if secretType == "" {
-		rows, err = s.db.QueryContext(ctx, `
-			SELECT id, type, blind_index, parent_blind_index, nonce, ciphertext, version, created_at, updated_at
-			FROM records ORDER BY updated_at DESC
-		`)
-	} else {
-		rows, err = s.db.QueryContext(ctx, `
-			SELECT id, type, blind_index, parent_blind_index, nonce, ciphertext, version, created_at, updated_at
-			FROM records WHERE type = ? ORDER BY updated_at DESC
-		`, string(secretType))
+func (s *SQLiteStore) List(ctx context.Context, kind vault.SecretType) ([]*vault.EncryptedRecord, error) {
+	return s.list(ctx, kind, nil)
+}
+
+func (s *SQLiteStore) ListProfile(ctx context.Context, profile string, kind vault.SecretType) ([]*vault.EncryptedRecord, error) {
+	return s.list(ctx, kind, &profile)
+}
+
+func (s *SQLiteStore) list(ctx context.Context, kind vault.SecretType, profile *string) ([]*vault.EncryptedRecord, error) {
+	query := `SELECT id,type,blind_index,parent_blind_index,nonce,ciphertext,version,created_at,updated_at,profile_id FROM records WHERE 1=1`
+	var args []any
+	if kind != "" {
+		query += ` AND type=?`
+		args = append(args, string(kind))
 	}
+	if profile != nil {
+		query += ` AND profile_id=?`
+		args = append(args, *profile)
+	}
+	rows, err := s.db.QueryContext(ctx, query+` ORDER BY updated_at DESC`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list records: %w", err)
 	}
 	defer rows.Close()
-
 	var out []*vault.EncryptedRecord
 	for rows.Next() {
 		rec, err := scanRecord(rows)
@@ -293,7 +301,7 @@ func scanRecord(row rowScanner) (*vault.EncryptedRecord, error) {
 		created, updated string
 		nonce, ct        []byte
 	)
-	if err := row.Scan(&rec.ID, &typ, &rec.BlindIndex, &rec.ParentBlindIndex, &nonce, &ct, &rec.Version, &created, &updated); err != nil {
+	if err := row.Scan(&rec.ID, &typ, &rec.BlindIndex, &rec.ParentBlindIndex, &nonce, &ct, &rec.Version, &created, &updated, &rec.ProfileID); err != nil {
 		return nil, err
 	}
 	rec.Type = vault.SecretType(typ)
