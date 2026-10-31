@@ -33,6 +33,7 @@ and SSH unlock session. See [profiles](docs/howto.md#work-and-personal-profiles)
 Start with [setup](docs/setup.md), then use the [command and recovery how-to](docs/howto.md).
 Remote access: [TLS 1.3 mTLS](docs/mtls.md) or [Tailscale](docs/tailscale.md).
 Development checks and PR settings: [CI guide](docs/ci.md).
+Fedora packages, systemd service and tag releases: [packaging guide](docs/packaging.md).
 
 Plain HTTP is restricted to loopback. Remote access requires mTLS or the
 embedded Tailscale listener with a restrictive tailnet policy. Docker Compose

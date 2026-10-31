@@ -1,0 +1,10 @@
+FROM fedora:44
+
+RUN dnf -y --setopt=install_weak_deps=False install \
+        golang meson ninja-build python3 rpm-build redhat-rpm-config \
+        systemd systemd-rpm-macros git-core openssh-clients ca-certificates \
+        make util-linux && \
+    dnf clean all
+
+COPY scripts/rpm_smoke.py /usr/local/libexec/sylva-rpm-smoke.py
+WORKDIR /src

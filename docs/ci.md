@@ -1,8 +1,9 @@
 # CI and local verification
 
 The [Check workflow](../.github/workflows/check.yml) runs on pushes, pull
-requests, and manual dispatch. Jobs run independently, so one failed analyzer
-does not prevent tests or the vulnerability scan from producing results.
+requests, and manual dispatch. Analysis, tests, fuzzing, security and binary
+builds run independently, so one failed analyzer does not prevent tests or the
+vulnerability scan from producing results. Packaging waits for those checks.
 
 | Check name | Purpose | Local equivalent |
 | --- | --- | --- |
@@ -12,13 +13,22 @@ does not prevent tests or the vulnerability scan from producing results.
 | Crypto fuzzing | Five seconds of mutation per crypto fuzz target, in addition to ordinary seed tests | `make fuzz FUZZTIME=5s` |
 | Build binaries | Build CLI and daemon | `make build` |
 | Docker mTLS and recovery | Isolated bridge-network transport and CLI recovery checks | `make docker-e2e` |
+| Fedora RPMs | Vendored Meson/RPM build, package installation, service permissions and config preservation on Fedora 44 | `make rpm` plus container smoke test |
 | check | Pass only when every job above succeeded | Aggregate CI status |
 
 `check` runs even when a dependency fails or is skipped. It fails for any
 failure, cancellation, or skipped dependency, and keeps one stable status
 name for branch protection. It has no checkout or repository write access.
-The workflow grants `contents: read`, disables persisted checkout credentials,
-and pins actions to commit SHAs. Docker E2E uses only disposable synthetic data.
+The check jobs grant `contents: read`, disable persisted checkout credentials,
+and pin actions to commit SHAs. Docker E2E uses only disposable synthetic data.
+
+Packaging runs after the original checks succeed and is itself required by
+`check`. Source preparation fetches full Git history and vendors the pinned Go
+modules; rpmbuild compiles offline with Meson. The binary build job installs
+pinned Meson/Ninja versions. On a `vX.Y.Z` tag push, a separate publication job
+waits for `check`, downloads the verified RPM artifacts from that same run,
+checks `SHA256SUMS`, and publishes a GitHub Release for the existing tag. Only
+that job has `contents: write`. See [packaging and release steps](packaging.md).
 
 ## Running locally
 

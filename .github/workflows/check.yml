@@ -127,10 +127,68 @@ jobs:
       - name: Test mTLS, passphrase rotation, backup and restore
         run: make docker-e2e
 
+  package:
+    name: Fedora RPMs
+    needs: [analysis, security, test, fuzz, build, docker-e2e]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Resolve and validate package version
+        id: version
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [ "$REF_TYPE" = tag ]; then
+            case "$REF_NAME" in
+              v*) version=$(python3 scripts/package.py version --version="$REF_NAME") ;;
+              *) echo 'Release tags must start with v, for example v1.2.3'; exit 1 ;;
+            esac
+          else
+            version=$(python3 scripts/package.py version)
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Build Fedora toolchain image
+        run: docker build --tag sylva-rpm-builder --file packaging/Dockerfile.fedora .
+      - name: Build vendored source and binary RPMs
+        env:
+          PACKAGE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          docker run --rm --user "$(id -u):$(id -g)" \
+            --volume "$PWD:/src" --workdir /src \
+            --env GOCACHE=/tmp/go-build --env GOMODCACHE=/tmp/go-mod --env GOPATH=/tmp/go \
+            sylva-rpm-builder make rpm BUILD_DIR=dist/meson-fedora VERSION="$PACKAGE_VERSION"
+      - name: Install and verify Fedora packages
+        env:
+          PACKAGE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          docker run --rm --volume "$PWD/dist/$PACKAGE_VERSION:/packages:ro" \
+            sylva-rpm-builder python3 /usr/local/libexec/sylva-rpm-smoke.py \
+            /packages --version="$PACKAGE_VERSION"
+      - name: Upload verified packages
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fedora-rpms
+          path: |
+            dist/${{ steps.version.outputs.version }}/*.rpm
+            dist/${{ steps.version.outputs.version }}/*.tar.gz
+            dist/${{ steps.version.outputs.version }}/sylva.spec
+            dist/${{ steps.version.outputs.version }}/sylva.sysusers
+            dist/${{ steps.version.outputs.version }}/CHANGELOG.rpm.txt
+            dist/${{ steps.version.outputs.version }}/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
+
   check:
     name: check
     if: ${{ always() }}
-    needs: [analysis, security, test, fuzz, build, docker-e2e]
+    needs: [analysis, security, test, fuzz, build, docker-e2e, package]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -148,3 +206,33 @@ jobs:
               exit 1
             fi
           done
+
+  release:
+    name: Publish tagged release
+    if: ${{ github.event_name == 'push' && github.ref_type == 'tag' && startsWith(github.ref_name, 'v') }}
+    needs: [check, package]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: fedora-rpms
+          path: release
+      - name: Verify and publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          PACKAGE_VERSION: ${{ needs.package.outputs.version }}
+        working-directory: release
+        run: |
+          sha256sum --check SHA256SUMS
+          options=()
+          if [[ "$PACKAGE_VERSION" == *-* ]]; then
+            options+=(--prerelease)
+          fi
+          gh release create "$RELEASE_TAG" --verify-tag --title "Sylva $RELEASE_TAG" \
+            --generate-notes "${options[@]}" ./*.rpm ./*.tar.gz \
+            ./sylva.spec ./sylva.sysusers ./CHANGELOG.rpm.txt ./SHA256SUMS

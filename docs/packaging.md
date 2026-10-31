@@ -1,4 +1,4 @@
-# Meson and Fedora RPMs
+# Meson, Fedora RPMs and releases
 
 Sylva is licensed under GPL-3.0-only; see [LICENSE](../LICENSE). The Fedora
 packaging builds two independent packages: `sylva` (CLI) and `sylvad` (optional
@@ -99,3 +99,31 @@ grant the `sylva` group the required read access, and restart the service after
 configuration changes. For Tailscale, use the packaged state directory and put
 the optional auth key in `/etc/sysconfig/sylvad`. Systemd limits writable paths
 to the service state directory and hides user home directories.
+
+## GitHub releases
+
+The Check workflow builds and verifies Fedora 44 x86_64 RPMs on pushes and pull
+requests. Its final `check` job requires packaging as well as analysis,
+vulnerability scanning, race tests, fuzzing, binary builds and Docker E2E.
+
+After committing and pushing the desired changes, publish a version tag:
+
+```sh
+git tag -a v1.2.3 -m 'Release v1.2.3'
+git push origin v1.2.3
+```
+
+Only a tag push can publish a GitHub Release. The release job waits for all
+checks and the Fedora package job from the same run to succeed, downloads
+those exact package artifacts, verifies their checksums, then publishes them
+under the existing tag. Prerelease tags create prereleases. A failed check
+creates no release. Only the publication job has `contents: write` permission.
+The repository must permit GitHub Actions to create releases with its
+`GITHUB_TOKEN`; no personal access token is required.
+
+RPMs are currently unsigned. `SHA256SUMS` provides integrity checking for the
+downloaded assets; distribution signing keys are not configured by this change.
+
+References: [Meson custom targets](https://mesonbuild.com/Custom-build-targets.html),
+[systemd packaging](https://www.freedesktop.org/software/systemd/man/latest/daemon.html),
+and [GitHub release creation](https://cli.github.com/manual/gh_release_create).
