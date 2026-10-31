@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+import time
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -168,6 +169,16 @@ def source_archive(stage, archive, epoch):
                         tar.addfile(info)
 
 
+def normalize_source_timestamps(source):
+    # Git dates can be ahead of the builder's clock. Keep the source archive
+    # reproducible, but prevent Meson/Ninja from rejecting its unpacked files.
+    now = time.time()
+    for path in [source, *source.rglob('*')]:
+        info = path.lstat()
+        if info.st_mtime > now:
+            os.utime(path, (min(info.st_atime, now), now), follow_symlinks=False)
+
+
 def prepare(source, output, version, go):
     output.mkdir(parents=True, exist_ok=True)
     text = changelog(source, version)
@@ -217,7 +228,7 @@ def checksums(output):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=('version', 'changelog', 'sources', 'rpm'))
+    parser.add_argument('command', choices=('version', 'changelog', 'sources', 'rpm', 'timestamps'))
     parser.add_argument('--source', type=Path, default=ROOT)
     parser.add_argument('--version')
     parser.add_argument('--dist-dir', type=Path, default=ROOT / 'dist')
@@ -227,6 +238,9 @@ def main():
     args = parser.parse_args()
     source = args.source.resolve()
     try:
+        if args.command == 'timestamps':
+            normalize_source_timestamps(source)
+            return
         version = resolve_version(source, args.version)
         if args.command == 'version':
             print(version)

@@ -41,6 +41,7 @@ It is not needed by clients using Git-backed vaults.
 
 %prep
 %autosetup -n %{name}-%{upstream_version}
+python3 scripts/package.py timestamps
 
 %build
 export GOTOOLCHAIN=local

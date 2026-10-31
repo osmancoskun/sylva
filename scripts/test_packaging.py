@@ -7,11 +7,32 @@ import subprocess
 import tarfile
 import tempfile
 import unittest
+from unittest import mock
 
 import package
 
 
 class PackagingTests(unittest.TestCase):
+    def test_future_source_timestamps_are_clamped_without_changing_history(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            future = root / 'meson.build'
+            past = root / 'VERSION'
+            epoch = root / 'SOURCE_DATE_EPOCH'
+            future.write_text("project('clock-skew-fixture')\n")
+            past.write_text('0.1.1\n')
+            epoch.write_text('1800007200\n')
+            os.utime(future, (1800007200, 1800007200))
+            os.utime(past, (1700000000, 1700000000))
+            os.utime(epoch, (1800007200, 1800007200))
+            with mock.patch('package.time.time', return_value=1800000000):
+                package.normalize_source_timestamps(root)
+            self.assertEqual(future.stat().st_mtime, 1800000000)
+            self.assertEqual(past.stat().st_mtime, 1700000000)
+            self.assertEqual(epoch.stat().st_mtime, 1800000000)
+            self.assertEqual(epoch.read_text(), '1800007200\n')
+            self.assertEqual(future.read_text(), "project('clock-skew-fixture')\n")
+
     def test_release_versions(self):
         self.assertEqual(package.normalize_version('v1.2.3'), '1.2.3')
         self.assertEqual(package.rpm_version('v1.2.3-rc.1'), '1.2.3~rc.1')

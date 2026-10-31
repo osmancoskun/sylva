@@ -74,6 +74,9 @@ Git messages are escaped. Full Git history is required during source preparation
 the source archive embeds the resulting changelog so RPM rebuilds need no Git
 checkout. Only explicit source file types are copied; vaults, local `.env`,
 certificates, keys and build artifacts are excluded.
+If Git commit dates are ahead of a builder's clock, RPM preparation clamps
+future timestamps in the unpacked build tree to that clock. The archive and
+embedded Git history keep their original timestamps.
 
 ## Install and operate the server
 
