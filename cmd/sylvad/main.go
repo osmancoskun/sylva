@@ -18,7 +18,16 @@ import (
 func main() {
 	envFile := flag.String("env", ".env", "path to environment configuration file")
 	addrOverride := flag.String("addr", "", "override listen address (host:port)")
+	printVersion := flag.Bool("version", false, "print server version information")
 	flag.Parse()
+	if *printVersion {
+		version := config.BuildVersion
+		if version == "" {
+			version = "0.1.0-dev"
+		}
+		fmt.Printf("sylvad v%s\n", version)
+		return
+	}
 
 	cfg, err := config.LoadServerConfig(*envFile)
 	if err != nil {

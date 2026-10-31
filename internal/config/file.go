@@ -16,6 +16,10 @@ import (
 //go:embed default.conf
 var defaultConf string
 
+// BuildVersion is optionally set by the linker for versioned Meson/RPM builds.
+// Local settings and environment overrides retain their existing precedence.
+var BuildVersion string
+
 type source int
 
 const (
@@ -111,6 +115,9 @@ func loadSettings(envPath string) (*settings, error) {
 	for k, v := range defaults {
 		s.vals[k] = v
 		s.src[k] = sourceDefault
+	}
+	if BuildVersion != "" {
+		s.vals["version"] = BuildVersion
 	}
 
 	if err := overlayFile(s, localConfigPath()); err != nil {

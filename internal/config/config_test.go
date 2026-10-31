@@ -13,6 +13,34 @@ func TestMain(m *testing.M) {
 	leakcheck.Verify(m)
 }
 
+func TestBuildVersionUsesNormalConfigPrecedence(t *testing.T) {
+	config.IsolateProcessEnv(t)
+	original := config.BuildVersion
+	config.BuildVersion = "1.2.3-rc.1"
+	t.Cleanup(func() { config.BuildVersion = original })
+	check := func(want string) {
+		t.Helper()
+		client, err := config.LoadClientConfig("")
+		if err != nil {
+			t.Fatal(err)
+		}
+		server, err := config.LoadServerConfig("")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if client.Version != want || server.Version != want {
+			t.Fatalf("version precedence: client=%s server=%s want=%s", client.Version, server.Version, want)
+		}
+	}
+	check("1.2.3-rc.1")
+	if err := os.WriteFile(config.LocalConfigPath(), []byte("version=local-version\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	check("local-version")
+	t.Setenv("SYLVA_VERSION", "environment-version")
+	check("environment-version")
+}
+
 func TestLoadConfigFromEnvFile(t *testing.T) {
 	config.IsolateProcessEnv(t)
 	envPath := filepath.Join("..", "..", ".env.example")
