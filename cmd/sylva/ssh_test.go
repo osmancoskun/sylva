@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -237,5 +238,57 @@ func TestSSHEnrollmentRequiresTheMasterPassphrase(t *testing.T) {
 	}
 	if err := runUnlockCommand(cfg, []string{"--sshh"}); err == nil {
 		t.Fatal("unknown unlock option silently used the master password")
+	}
+}
+
+func TestGitBackendCLIAndSSHUnlock(t *testing.T) {
+	config.IsolateProcessEnv(t)
+	cfg, err := config.LoadClientConfig("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Backend, cfg.GitBranch = "git", "main"
+	cfg.GitRemote = filepath.Join(t.TempDir(), "remote.git")
+	if out, err := exec.Command("git", "init", "--bare", cfg.GitRemote).CombinedOutput(); err != nil {
+		t.Fatalf("create test remote: %v: %s", err, out)
+	}
+	cfg.CacheEnabled, cfg.KeyringEnabled = false, false
+	cfg.Timeout = 30 * time.Second
+	cfg.Crypto.KDFMemoryKB, cfg.Crypto.KDFTime, cfg.Crypto.KDFThreads = 1024, 1, 1
+	cfg.SSHUnlockDir = filepath.Join(t.TempDir(), "ssh")
+	cfg.MasterPassphrase = "synthetic Git CLI master"
+	socket, publicPath, _ := sshTestIdentity(t)
+	t.Setenv("SSH_AUTH_SOCK", socket)
+	_ = sshTestSession(t, &cfg)
+	if err := runPing(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := runInit(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := runUnlock(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := runSSH(cfg, []string{"add", publicPath}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runLock(cfg); err != nil {
+		t.Fatal(err)
+	}
+	cfg.MasterPassphrase = ""
+	if err := runUnlockSSH(cfg); err != nil {
+		t.Fatal(err)
+	}
+	v, err := openUnlocked(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = v.Close()
+	path, _ := sshRegistration(cfg)
+	other := cfg
+	other.GitBranch = "other"
+	otherPath, _ := sshRegistration(other)
+	if path == otherPath {
+		t.Fatal("different Git vaults share an SSH unlock registration")
 	}
 }

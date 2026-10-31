@@ -53,24 +53,12 @@ func envVarFor(key string) string {
 }
 
 func knownKey(key string) bool {
-	switch key {
-	case "service_name", "version", "log_level",
-		"host", "port", "scheme", "api_prefix", "server_addr", "server_url",
-		"server_read_header_timeout", "server_read_timeout", "server_write_timeout",
-		"server_idle_timeout", "server_shutdown_timeout", "client_timeout", "max_body_bytes", "max_vault_bytes", "max_backup_bytes",
-		"server_db_path", "client_cache_enabled", "client_cache_path",
-		"sqlite_busy_timeout", "record_initial_version",
-		"kdf_time", "kdf_memory_kb", "kdf_threads", "kdf_key_len", "kdf_salt_len", "password_default_len",
-		"master_passphrase",
-		"clipboard_clear_after", "clipboard_backend", "clipboard_file",
-		"agent_enabled", "agent_idle_timeout", "agent_request_timeout", "agent_max_request_bytes", "agent_max_connections", "agent_socket_path", "agent_log_path",
-		"keyring_enabled", "keyring_service", "keyring_user", "ssh_unlock_dir",
-		"mtls", "ca_cert_path", "server_cert_path", "server_key_path", "client_cert_path", "client_key_path",
-		"tailscale", "tailscale_node", "tailscale_state_dir", "tailscale_authkey", "tailscale_tags":
-		return true
-	default:
-		return false
+	for _, known := range knownKeys() {
+		if key == known {
+			return true
+		}
 	}
+	return false
 }
 
 func parseKV(r io.Reader, origin string) (map[string]string, []string, error) {
@@ -175,7 +163,7 @@ func overlayEnv(s *settings) {
 
 func knownKeys() []string {
 	return []string{
-		"service_name", "version", "log_level",
+		"service_name", "version", "log_level", "backend", "git_remote", "git_branch", "git_timeout", "git_cache_dir",
 		"host", "port", "scheme", "api_prefix", "server_addr", "server_url",
 		"server_read_header_timeout", "server_read_timeout", "server_write_timeout",
 		"server_idle_timeout", "server_shutdown_timeout", "client_timeout", "max_body_bytes", "max_vault_bytes", "max_backup_bytes",
@@ -185,7 +173,7 @@ func knownKeys() []string {
 		"master_passphrase",
 		"clipboard_clear_after", "clipboard_backend", "clipboard_file",
 		"agent_enabled", "agent_idle_timeout", "agent_request_timeout", "agent_max_request_bytes", "agent_max_connections", "agent_socket_path", "agent_log_path",
-		"keyring_enabled", "keyring_service", "keyring_user",
+		"keyring_enabled", "keyring_service", "keyring_user", "ssh_unlock_dir",
 		"mtls", "ca_cert_path", "server_cert_path", "server_key_path", "client_cert_path", "client_key_path",
 		"tailscale", "tailscale_node", "tailscale_state_dir", "tailscale_authkey", "tailscale_tags",
 	}

@@ -16,6 +16,9 @@ import (
 
 func sshRegistration(cfg config.ClientConfig) (path, endpoint string) {
 	endpoint = sshunlock.Endpoint(cfg.ServerURL, cfg.APIPrefix)
+	if cfg.Backend == "git" {
+		endpoint = "git\x00" + cfg.GitRemote + "\x00" + cfg.GitBranch
+	}
 	return sshunlock.Path(cfg.SSHUnlockDir, endpoint), endpoint
 }
 
@@ -77,7 +80,7 @@ func registerSSH(cfg config.ClientConfig, publicKeyPath, path, endpoint string) 
 	if err != nil {
 		return err
 	}
-	v, err := sylva.Open(cfg)
+	v, err := sylva.OpenForCommand(cfg)
 	if err != nil {
 		return err
 	}
@@ -137,7 +140,7 @@ func runUnlockSSH(cfg config.ClientConfig) error {
 	if !cfg.AgentEnabled {
 		return errors.New("SSH unlock requires agent_enabled=true to keep the unlocked session")
 	}
-	v, err := sylva.Open(cfg)
+	v, err := sylva.OpenForCommand(cfg)
 	if err != nil {
 		return err
 	}

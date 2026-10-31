@@ -24,6 +24,7 @@ ENTRYPOINT ["sylvad"]
 
 # Stage 4: Minimal sylva CLI client container
 FROM ${RUNTIME_IMAGE} AS sylva
+RUN apk add --no-cache ca-certificates git openssh-client
 WORKDIR /tmp
 COPY --from=builder /out/sylva /usr/local/bin/sylva
 ENTRYPOINT ["sylva"]

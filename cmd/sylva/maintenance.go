@@ -67,7 +67,7 @@ func runRestore(cfg config.ClientConfig, path string) error {
 			return err
 		}
 	}
-	v, err := sylva.Open(cfg)
+	v, err := sylva.OpenForCommand(cfg)
 	if err != nil {
 		return err
 	}

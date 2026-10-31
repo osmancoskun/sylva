@@ -1,6 +1,9 @@
 # Setup
 
-Sylva is two binaries. Tunables (timeouts, Argon2id, password length, paths) ship in `internal/config/default.conf` and optional `.sylva/config`. `.env` is only host, port, and secrets (auth key, passphrase). `sylvad` stores ciphertext in SQLite. `sylva` encrypts on the client, talks to the daemon, and copies secrets to the clipboard. Secret values and identifiers remain encrypted on the server. Record IDs, types, blind indexes and parent links, versions, timestamps, and ciphertext sizes remain visible as metadata.
+Sylva is two binaries. Tunables (timeouts, Argon2id, password length, paths) ship in `internal/config/default.conf` and optional `.sylva/config`. `.env` is only host, port, and secrets (auth key, passphrase). The default self-hosted backend uses `sylvad` to store ciphertext in SQLite. The optional Git backend connects directly from `sylva` to a dedicated Git branch. `sylva` encrypts on the client and copies secrets to the clipboard. Secret values and identifiers remain encrypted in remote storage. Record IDs, types, blind indexes and parent links, versions, timestamps, and ciphertext sizes remain visible as metadata.
+
+For a vault without a daemon, follow [Git setup](howto.md#use-a-git-backed-vault).
+The daemon, HTTP TLS and Tailscale setup below applies to self-hosted storage.
 
 This page is a first run on **localhost over HTTP**. TLS 1.3 mTLS is optional and later: [mtls.md](mtls.md). Tailscale is optional: [tailscale.md](tailscale.md).
 

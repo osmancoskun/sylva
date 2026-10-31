@@ -55,6 +55,10 @@ type ServerConfig struct {
 
 // ClientConfig holds runtime configuration for the sylva CLI client.
 type ClientConfig struct {
+	Backend              string
+	GitRemote            string
+	GitBranch            string
+	GitCacheDir          string
 	Version              string
 	Scheme               string
 	Host                 string
@@ -268,6 +272,13 @@ func LoadClientConfig(envPath string) (ClientConfig, error) {
 	if err != nil {
 		return ClientConfig{}, err
 	}
+	backend := strings.ToLower(strings.TrimSpace(s.get("backend")))
+	if backend != "self-hosted" && backend != "git" {
+		return ClientConfig{}, fmt.Errorf("backend must be self-hosted or git")
+	}
+	if backend == "git" && strings.TrimSpace(s.get("git_remote")) == "" {
+		return ClientConfig{}, fmt.Errorf("git_remote is required for the git backend")
+	}
 
 	scheme := s.get("scheme")
 	host := s.get("host")
@@ -283,6 +294,12 @@ func LoadClientConfig(envPath string) (ClientConfig, error) {
 	timeout, err := s.durationVal("client_timeout")
 	if err != nil {
 		return ClientConfig{}, err
+	}
+	if backend == "git" {
+		timeout, err = s.durationVal("git_timeout")
+		if err != nil || timeout <= 0 {
+			return ClientConfig{}, fmt.Errorf("git_timeout must be positive")
+		}
 	}
 	maxBodyBytes, maxVaultBytes, err := transferLimits(s)
 	if err != nil {
@@ -353,9 +370,12 @@ func LoadClientConfig(envPath string) (ClientConfig, error) {
 	caCertPath := firstNonEmpty(s.get("ca_cert_path"), DefaultCACertPath)
 	clientCertPath := firstNonEmpty(s.get("client_cert_path"), DefaultClientCertPath)
 	clientKeyPath := firstNonEmpty(s.get("client_key_path"), DefaultClientKeyPath)
-	enableMTLS, err := resolveMTLS(s)
-	if err != nil {
-		return ClientConfig{}, err
+	enableMTLS := false
+	if backend == "self-hosted" {
+		enableMTLS, err = resolveMTLS(s)
+		if err != nil {
+			return ClientConfig{}, err
+		}
 	}
 	if enableMTLS {
 		scheme = "https"
@@ -370,6 +390,10 @@ func LoadClientConfig(envPath string) (ClientConfig, error) {
 	}
 
 	return ClientConfig{
+		Backend:              backend,
+		GitRemote:            s.get("git_remote"),
+		GitBranch:            s.get("git_branch"),
+		GitCacheDir:          s.get("git_cache_dir"),
 		Version:              s.get("version"),
 		Scheme:               scheme,
 		Host:                 host,

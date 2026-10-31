@@ -11,7 +11,6 @@ import (
 
 	sylva "github.com/osman/sylva/internal/client"
 	"github.com/osman/sylva/internal/config"
-	"github.com/osman/sylva/internal/transport"
 )
 
 func main() {
@@ -78,6 +77,9 @@ func main() {
 	}
 
 	if *serverOverride != "" {
+		if cfg.Backend == "git" {
+			fatal(fmt.Errorf("--server applies to the self-hosted backend; configure git_remote for Git"))
+		}
 		cfg.ServerURL = *serverOverride
 	}
 	if *timeoutOverride > 0 {
@@ -165,7 +167,7 @@ func main() {
 }
 
 func runPing(cfg config.ClientConfig) error {
-	client, err := transport.NewClient(cfg)
+	client, err := sylva.NewBackend(cfg)
 	if err != nil {
 		return err
 	}
@@ -181,7 +183,11 @@ func runPing(cfg config.ClientConfig) error {
 	}
 	rtt := time.Since(start).Round(time.Microsecond)
 
-	fmt.Printf("Connected to %s (%s)\n", status.Service, cfg.ServerURL)
+	address := cfg.ServerURL
+	if cfg.Backend == "git" {
+		address = cfg.GitRemote + " (branch " + cfg.GitBranch + ")"
+	}
+	fmt.Printf("Connected to %s (%s)\n", status.Service, address)
 	fmt.Printf("  Status:    %s\n", status.Status)
 	fmt.Printf("  Version:   %s\n", status.Version)
 	fmt.Printf("  mTLS:      %t\n", status.MTLS)
@@ -194,7 +200,7 @@ func runPing(cfg config.ClientConfig) error {
 }
 
 func runInit(cfg config.ClientConfig) error {
-	v, err := sylva.Open(cfg)
+	v, err := sylva.OpenForCommand(cfg)
 	if err != nil {
 		return err
 	}
@@ -207,7 +213,7 @@ func runInit(cfg config.ClientConfig) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Vault initialized (%d-byte Argon2id salt is stored on the server)\n", len(salt))
+	fmt.Printf("Vault initialized (%d-byte Argon2id salt is stored in the vault backend)\n", len(salt))
 	return nil
 }
 

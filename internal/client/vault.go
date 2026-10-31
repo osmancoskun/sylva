@@ -16,7 +16,6 @@ import (
 	"github.com/osman/sylva/internal/crypto"
 	"github.com/osman/sylva/internal/limits"
 	"github.com/osman/sylva/internal/storage"
-	"github.com/osman/sylva/internal/transport"
 	"github.com/osman/sylva/internal/tree"
 	"github.com/osman/sylva/internal/vault"
 )
@@ -38,7 +37,7 @@ var (
 // Vault is a client-side session over a remote sylvad store and optional local cache.
 type Vault struct {
 	cfg       config.ClientConfig
-	remote    *transport.Client
+	remote    Backend
 	cache     storage.Store
 	masterKey []byte
 }
@@ -49,7 +48,7 @@ func Open(cfg config.ClientConfig) (*Vault, error) {
 	if err := limits.Validate("max_backup_bytes", cfg.MaxBackupBytes); err != nil {
 		return nil, err
 	}
-	remote, err := transport.NewClient(cfg)
+	remote, err := NewBackend(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -60,6 +59,7 @@ func Open(cfg config.ClientConfig) (*Vault, error) {
 	if cfg.CacheEnabled {
 		cache, err := storage.OpenSQLite(cfg.CachePath, cfg.SQLiteBusyTimeout)
 		if err != nil {
+			remote.Close()
 			return nil, fmt.Errorf("open client cache: %w", err)
 		}
 		v.cache = cache
@@ -81,7 +81,7 @@ func (v *Vault) Close() error {
 }
 
 // Remote returns the underlying transport client (used for ping).
-func (v *Vault) Remote() *transport.Client {
+func (v *Vault) Remote() Backend {
 	return v.remote
 }
 

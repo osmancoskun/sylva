@@ -21,7 +21,7 @@ import (
 )
 
 func openUnlocked(cfg config.ClientConfig) (*sylva.Vault, error) {
-	v, err := sylva.Open(cfg)
+	v, err := sylva.OpenForCommand(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +113,7 @@ func resolvePassphrase(cfg config.ClientConfig, v *sylva.Vault) (string, error) 
 }
 
 func runUnlock(cfg config.ClientConfig) error {
-	v, err := sylva.Open(cfg)
+	v, err := sylva.OpenForCommand(cfg)
 	if err != nil {
 		return err
 	}

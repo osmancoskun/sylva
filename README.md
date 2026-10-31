@@ -2,7 +2,7 @@
 
 ![WIP](https://img.shields.io/badge/status-WIP-yellow)
 
-Self-hosted password manager. You encrypt secrets on your machine. `sylvad` only stores ciphertext. Subdomains can inherit a parent login (`mail.company.com` → `company.com`). `sylva get` copies a password to the clipboard and clears it after a timeout.
+Password manager with self-hosted and Git storage backends. You encrypt secrets on your machine. The self-hosted `sylvad` server or a dedicated Git branch stores ciphertext. Subdomains can inherit a parent login (`mail.company.com` → `company.com`). `sylva get` copies a password to the clipboard and clears it after a timeout.
 
 ```mermaid
 flowchart LR
@@ -19,6 +19,12 @@ The client derives a master key from your passphrase and a salt. The salt lives 
 Logins sit in a domain tree. `mail.company.com` can inherit `company.com` instead of storing another password.
 
 `sylvad` is the HTTP server and SQLite store. `sylva` is the CLI and exits when the command finishes. `sylva agent` keeps the session key and clipboard after that. `get` starts the agent if it is not running.
+
+Self-hosted storage remains the default. For Git, configure `backend=git`,
+`git_remote` and `git_branch` in `.sylva/config`; no `sylvad` is needed.
+Every successful write publishes one ciphertext-only commit, with concurrent
+changes rejected instead of overwritten. See [Git setup](docs/howto.md#use-a-git-backed-vault)
+for SSH access, history, migration and connectivity requirements.
 
 Start with [setup](docs/setup.md), then use the [command and recovery how-to](docs/howto.md).
 Remote access: [TLS 1.3 mTLS](docs/mtls.md) or [Tailscale](docs/tailscale.md).

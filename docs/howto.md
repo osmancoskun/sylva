@@ -130,6 +130,116 @@ namespace; HKDF-SHA256 derives the AES-256-GCM wrapping key from the verified,
 deterministic Ed25519 signature. This is a convenience unlock mechanism, not
 a second authentication factor.
 
+## Use a Git-backed vault
+
+Self-hosted storage is still the default (`backend=self-hosted`). Git is an
+optional client backend; it does not require `sylvad` or a Sylva TLS listener.
+Create a separate **private, empty repository** on GitHub, GitLab, or another
+Git server. Do not initialize the selected branch with a README or source code.
+Alternatively, select a new dedicated branch in an existing private repository.
+Sylva refuses a branch containing unrelated files.
+
+Configure `.sylva/config` on each device:
+
+```ini
+backend=git
+git_remote=git@github.com:YOUR_USER/sylva-vault.git
+git_branch=main
+git_timeout=30s
+git_cache_dir=.sylva/git
+```
+
+These are local configuration settings, not `.env` settings. Process environment
+overrides such as `SYLVA_BACKEND`, `SYLVA_GIT_REMOTE`, `SYLVA_GIT_BRANCH` and
+`SYLVA_GIT_TIMEOUT` are also supported. `-server` applies only to self-hosted
+storage; it cannot override the Git destination.
+
+Install Git and OpenSSH on CLI hosts. The Docker CLI image includes both.
+Load the intended SSH key into your existing SSH agent and establish the Git
+host's verified key in `known_hosts` using your normal SSH setup. Sylva uses
+SSH batch mode and strict host-key checking: it does not accept unknown host
+keys or prompt for an SSH private-key passphrase during a Git operation.
+Standard `~/.ssh/config` host aliases, identity files and jump hosts apply.
+
+```bash
+ssh-add ~/.ssh/id_ed25519
+./bin/sylva ping
+./bin/sylva unlock
+# First device creates the master passphrase; other devices enter that same one.
+./bin/sylva set github-token password
+./bin/sylva get github-token password
+./bin/sylva lock
+```
+
+Git over SSH provides encrypted transport without Sylva mTLS certificates.
+HTTPS Git remotes are also supported, with TLS verification enabled and
+credentials supplied through a configured Git credential helper. Use the
+canonical repository URL; HTTP redirects are disabled. Do not embed
+passwords or tokens in `git_remote`. Plain HTTP, `git://`, and executable remote
+helpers are rejected. Absolute local bare repository paths and local `file://`
+URLs are supported for private local storage and tests.
+
+Git authentication grants repository access. Master-passphrase or registered
+SSH unlock grants decryption access; these remain separate. The optional
+`sylva ssh add` / `sylva unlock --ssh` flow also works with Git. Register on each
+device after selecting its Git backend; registrations are bound to the remote
+and branch. Changing only an HTTP server URL does not select a different Git
+vault. Use separate working directories or override agent/cache paths when
+working with multiple vaults.
+
+The selected branch contains `vault.json` for the format marker, salt, KDF
+parameters, key verifier, revision/generation and an ID-to-blind-index map.
+Each encrypted record is a separate `records/<blind-index>.json` file. File names
+never contain plaintext identifiers. Record types, versions, timestamps, sizes
+and blind indexes remain visible as in self-hosted storage; secret values and
+identifiers stay encrypted. Commit messages contain no secret identifiers.
+
+Each CLI command fetches the live branch once, then verifies the key and reads
+records from that same commit. Single-record reads decode only the requested
+record; listing and domain-tree resolution may read multiple records. Writes
+reuse unchanged Git blobs and publish one commit only if the fetched branch tip
+is still current. A concurrent branch update or stale record edit fails: fetch
+the latest state and review before retrying. No merge, rebase, automatic conflict
+retry, or overwrite of another writer is performed. Passphrase rotation and
+restore still publish all records and metadata together in one commit.
+
+A private bare Git repository is retained under `git_cache_dir` (default
+`.sylva/git`), separately for each remote and branch. Git can reuse downloaded
+objects on later commands; the initial fetch still transfers the current vault.
+Cross-process locks protect the local repository. Files are never checked out,
+and client-side hooks are disabled. The directory must have mode `0700`.
+The cache contains ciphertext and can be removed while no commands are running;
+the next command downloads it again. It is independent of the SQLite cache and
+is used even if `client_cache_enabled=false`.
+
+Remote access is still required for every command's initial fetch. A failed
+fetch never silently falls back to cached data, and there is no offline write
+queue. Record writes require a push as well as that fetch, so network latency
+still contributes to operation time.
+
+Existing `sylva-vault.json` (`sylva-git-v1`) vaults remain readable. The first
+successful write converts the branch to the new layout in the same atomic
+commit as that change, preserving existing ciphertext and the master passphrase.
+Upgrade all Git clients before writing: older clients cannot read the new layout.
+The old file remains accessible in Git history.
+
+`passwd`, `backup` and `restore` use the same client encryption as self-hosted
+storage. A master-passphrase change publishes all newly encrypted records and
+metadata together; old sessions cannot write to the current vault generation.
+**Git history still contains earlier ciphertext.** Deleting a record or changing
+the master passphrase does not erase historical commits, clones, or backups.
+Old master keys can still decrypt those historical versions. Git access can
+also allow deletion or rollback of the repository; encryption alone does not
+prove that the provider supplied the newest historical state.
+
+To move an existing vault, make a new encrypted backup while configured for
+its current backend, then lock the session. Select a fresh Git remote/branch
+and run `sylva restore <backup-file>` using the backup's master passphrase.
+Do **not** unlock/initialize a master passphrase on the target before restoring:
+restore requires an uninitialized vault. The source remains untouched. Reverse
+migration uses a backup and a fresh self-hosted database in the same way.
+Selecting a backend never automatically migrates or dual-writes a vault.
+
 ## Domains, environment variables, and SSH
 
 ```bash
