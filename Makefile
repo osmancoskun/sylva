@@ -1,8 +1,11 @@
 BINARY_CLI := sylva
 BINARY_DAEMON := sylvad
 BUILD_DIR := bin
-GO := go
-GOFLAGS :=
+GO ?= go
+MESON ?= meson
+PYTHON ?= python3
+VERSION ?= $(shell $(PYTHON) scripts/package.py version)
+PREFIX ?= /usr
 # Isolated BuildKit cannot resolve proxy.golang.org on this host; classic
 # builder honors compose `build.network: host`.
 export DOCKER_BUILDKIT := 0
@@ -13,19 +16,31 @@ BENCHTIME ?= 2s
 PROFILE_DIR ?= .profiles
 COVERAGE_DIR ?= .coverage
 
-.PHONY: all build build-cli build-daemon test vet check analyze security coverage fuzz bench profile-memory clean docker-test docker-smoke docker-e2e docker-down
+.PHONY: all build build-cli build-daemon meson-setup install packaging-test test vet check analyze security coverage fuzz bench profile-memory clean docker-test docker-smoke docker-e2e docker-down
 
 all: build
 
-build: build-cli build-daemon
+meson-setup:
+	@if [ -f "$(BUILD_DIR)/meson-private/coredata.dat" ]; then \
+		$(MESON) setup --reconfigure "$(BUILD_DIR)" --prefix="$(PREFIX)" -Dgo="$(GO)" -Drelease_version="$(VERSION)"; \
+	else \
+		$(MESON) setup "$(BUILD_DIR)" --prefix="$(PREFIX)" -Dgo="$(GO)" -Drelease_version="$(VERSION)"; \
+	fi
 
-build-cli:
-	@mkdir -p $(BUILD_DIR)
-	$(GO) build $(GOFLAGS) -o $(BUILD_DIR)/$(BINARY_CLI) ./cmd/sylva
+build: meson-setup
+	$(MESON) compile -C "$(BUILD_DIR)" $(BINARY_CLI) $(BINARY_DAEMON)
 
-build-daemon:
-	@mkdir -p $(BUILD_DIR)
-	$(GO) build $(GOFLAGS) -o $(BUILD_DIR)/$(BINARY_DAEMON) ./cmd/sylvad
+build-cli: meson-setup
+	$(MESON) compile -C "$(BUILD_DIR)" $(BINARY_CLI)
+
+build-daemon: meson-setup
+	$(MESON) compile -C "$(BUILD_DIR)" $(BINARY_DAEMON)
+
+install: build
+	$(MESON) install -C "$(BUILD_DIR)" --no-rebuild
+
+packaging-test:
+	$(PYTHON) scripts/test_packaging.py
 
 test:
 	$(GO) test -race -count=1 -timeout=5m -cover ./...

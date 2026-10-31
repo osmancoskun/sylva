@@ -1,0 +1,3 @@
+option('release_version', type: 'string', value: '', description: 'Override the Git tag / VERSION build version')
+option('go', type: 'string', value: 'go', description: 'Go toolchain executable')
+option('offline', type: 'boolean', value: false, description: 'Build only with vendored modules and no network access')

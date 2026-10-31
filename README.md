@@ -58,7 +58,7 @@ see [existing certificate updates](docs/mtls.md#add-tailscale-to-existing-certif
 ## Use
 
 Linux is the supported desktop. Install the Go toolchain specified in
-`go.mod` and `make`. The default clipboard needs an accessible X11 display or
+`go.mod`, `make`, Python 3, Meson and Ninja. The default clipboard needs an accessible X11 display or
 a Wayland compositor supporting `wlr-data-control`; it fails if neither is
 available. Keep the session agent enabled for desktop copying.
 

@@ -6,6 +6,9 @@
 *.dylib
 bin/
 dist/
+/build/
+/stage/
+__pycache__/
 /sylva
 /sylvad
 

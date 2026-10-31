@@ -4,6 +4,8 @@
 !.env.example
 bin/
 dist/
+build/
+stage/
 .coverage/
 .profiles/
 *.db
@@ -17,3 +19,4 @@ dist/
 .idea/
 .vscode/
 .DS_Store
+__pycache__/
