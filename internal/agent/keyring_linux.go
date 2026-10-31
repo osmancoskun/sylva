@@ -5,14 +5,15 @@ import (
 	"fmt"
 	"syscall"
 	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
 
 const (
-	keyctlGetKeyringID = 0
-	keyctlUpdate       = 2
-	keyctlUnlink       = 9
-	keyctlRead         = 11
-	keyTypeUser        = "user"
+	keyctlUpdate = 2
+	keyctlUnlink = 9
+	keyctlRead   = 11
+	keyTypeUser  = "user"
 )
 
 // Linux keyctl special keyring IDs are negative; convert at runtime so the
@@ -99,9 +100,14 @@ func deleteUserKey(description string, ensure func() error, lookup func(string) 
 }
 
 func ensureUserKeyring() error {
-	_, err := keyctl(keyctlGetKeyringID, uintptr(keySpecUserKeyring), 1, 0, 0)
+	serial, err := unix.KeyctlGetKeyringID(unix.KEY_SPEC_USER_KEYRING, true)
 	if err != nil {
 		return fmt.Errorf("kernel user keyring: %w", err)
+	}
+	// User keys grant read/update access through possession. A non-login
+	// session may not possess the user keyring until it is linked here.
+	if _, err := unix.KeyctlInt(unix.KEYCTL_LINK, serial, unix.KEY_SPEC_SESSION_KEYRING, 0, 0); err != nil {
+		return fmt.Errorf("link kernel user keyring to session: %w", err)
 	}
 	return nil
 }
@@ -131,27 +137,10 @@ func addUserKey(description string, payload []byte) (int32, error) {
 }
 
 func requestUserKey(description string) (int32, error) {
-	typ, err := syscall.BytePtrFromString(keyTypeUser)
-	if err != nil {
-		return 0, err
-	}
-	desc, err := syscall.BytePtrFromString(description)
-	if err != nil {
-		return 0, err
-	}
-	r1, _, errno := syscall.Syscall6(
-		syscall.SYS_REQUEST_KEY,
-		uintptr(unsafe.Pointer(typ)),
-		uintptr(unsafe.Pointer(desc)),
-		0,
-		uintptr(keySpecUserKeyring),
-		0,
-		0,
-	)
-	if errno != 0 {
-		return 0, errno
-	}
-	return int32(r1), nil
+	// request_key searches the thread/process/session keyrings, which may not
+	// contain a link to the user keyring (for example on CI runners).
+	serial, err := unix.KeyctlSearch(unix.KEY_SPEC_USER_KEYRING, keyTypeUser, description, 0)
+	return int32(serial), err
 }
 
 func keyctl(cmd int, arg2, arg3, arg4, arg5 uintptr) (uintptr, error) {

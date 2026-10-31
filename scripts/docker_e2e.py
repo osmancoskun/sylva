@@ -74,16 +74,24 @@ def rotate_passphrase(command, env):
     proc = None
     transcript = bytearray()
     prompts = [b"New master passphrase: ", b"Confirm new master passphrase: "]
+
+    def failure_detail():
+        output = transcript.decode(errors="replace")
+        for secret in (OLD_PASS, NEW_PASS):
+            output = output.replace(secret, "[REDACTED]")
+        return (f"exit={proc.poll() if proc else None}, prompts={step}/{len(prompts)}\n"
+                f"{output[-4096:]}")
+
+    step = 0
     try:
         proc = subprocess.Popen(command, env=env, stdin=slave, stdout=slave, stderr=slave,
                                 start_new_session=True)
         os.close(slave)
         slave = None
         deadline = time.monotonic() + 90
-        step = 0
         while True:
             if time.monotonic() >= deadline:
-                raise RuntimeError("Passphrase terminal prompts timed out")
+                raise RuntimeError("Passphrase terminal prompts timed out: " + failure_detail())
             ready, _, _ = select.select([master], [], [], 0.2)
             if ready:
                 try:
@@ -105,7 +113,7 @@ def rotate_passphrase(command, env):
                 break
         require(proc.wait(timeout=10) == 0 and step == 2 and
                 b"Master passphrase changed" in transcript,
-                "Interactive passphrase rotation failed")
+                "Interactive passphrase rotation failed: " + failure_detail())
         require(NEW_PASS.encode() not in transcript, "Passphrase was echoed by the terminal")
     finally:
         if slave is not None:

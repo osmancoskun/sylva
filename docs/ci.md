@@ -23,6 +23,10 @@ and pins actions to commit SHAs. Docker E2E uses only disposable synthetic data.
 ## Running locally
 
 Use the Go toolchain from `go.mod`; analysis tools are also pinned there.
+The minimum Go patch version includes required standard-library security fixes
+and is also used by CI. NilAway analyzes every application package, including
+tests, with `-include-pkgs=github.com/osman/sylva/` to bound analysis of large
+dependencies.
 `make check` still runs the complete local analysis/security/test suite and
 returns failure if any check fails. `scripts/check.sh` also accepts `all`,
 `analysis`, `security`, or `test` to run a group directly. Invalid groups fail.

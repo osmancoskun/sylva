@@ -8,7 +8,7 @@ Linux is the supported desktop: native X11/Wayland clipboard and the kernel keyr
 
 ## Build
 
-You need Go 1.26 (toolchain `go1.26.10` in `go.mod`) and `make`. Docker is only for tests.
+You need Go 1.26.10 (the minimum version in `go.mod`) and `make`. Docker is only for tests.
 
 ```bash
 cp .env.example .env
