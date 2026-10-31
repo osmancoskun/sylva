@@ -26,7 +26,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  version              Print client version information\n")
 		fmt.Fprintf(os.Stderr, "  profile create|list|current|use  Manage profiles in the connected vault\n")
 		fmt.Fprintf(os.Stderr, "  switch <profile>     Select the active profile on this device\n")
-		fmt.Fprintf(os.Stderr, "  init                 Initialize the vault salt on the server\n")
+		fmt.Fprintf(os.Stderr, "  init                 Guided first-time setup (or --non-interactive)\n")
 		fmt.Fprintf(os.Stderr, "  unlock [--ssh]       Unlock with the master passphrase or a registered SSH key\n")
 		fmt.Fprintf(os.Stderr, "  ssh add <pubkey>     Register an Ed25519 SSH agent key using the master passphrase\n")
 		fmt.Fprintf(os.Stderr, "  ssh status|remove    Inspect or remove this device's SSH unlock registration\n")
@@ -73,6 +73,14 @@ func main() {
 		return
 	}
 
+	if cmd == "init" {
+		opts := initOverrides{server: *serverOverride, profile: *profileOverride, timeout: *timeoutOverride}
+		if err := runInitCommand(*envFile, args[1:], opts); err != nil {
+			fatal(err)
+		}
+		return
+	}
+
 	cfg, err := config.LoadClientConfig(*envFile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Configuration error: %v\n", err)
@@ -113,10 +121,6 @@ func main() {
 		}
 	case "version":
 		fmt.Printf("sylva client v%s\n", cfg.Version)
-	case "init":
-		if err := runInit(cfg); err != nil {
-			fatal(err)
-		}
 	case "unlock":
 		if err := runUnlockCommand(cfg, args[1:]); err != nil {
 			fatal(err)

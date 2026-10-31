@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -284,8 +285,17 @@ func (s *settings) uint8Val(key string) (uint8, error) {
 }
 
 func writeLocalKey(key, value string) error {
-	if !knownKey(key) {
-		return fmt.Errorf("unknown config key %q", key)
+	return writeLocalKeys(map[string]string{key: value})
+}
+
+func writeLocalKeys(changes map[string]string) error {
+	for key, value := range changes {
+		if !knownKey(key) {
+			return fmt.Errorf("unknown config key %q", key)
+		}
+		if strings.ContainsAny(value, "\r\n\x00") {
+			return fmt.Errorf("invalid config value for %s", key)
+		}
 	}
 	path := localConfigPath()
 	vals := map[string]string{}
@@ -301,10 +311,17 @@ func writeLocalKey(key, value string) error {
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("open local config %s: %w", path, err)
 	}
-	if _, seen := vals[key]; !seen {
-		order = append(order, key)
+	keys := make([]string, 0, len(changes))
+	for key := range changes {
+		keys = append(keys, key)
 	}
-	vals[key] = value
+	sort.Strings(keys)
+	for _, key := range keys {
+		if _, seen := vals[key]; !seen {
+			order = append(order, key)
+		}
+		vals[key] = changes[key]
+	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create local config dir: %w", err)

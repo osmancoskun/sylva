@@ -53,13 +53,31 @@ An already unlocked client may read its last cached snapshot after a connection 
 
 ## Initialize the vault
 
-Once, against an empty server:
+Run the guided first-time setup in a terminal:
 
 ```bash
 ./bin/sylva init
 ```
 
-That writes the Argon2id **salt** as server metadata. Clients derive the master key from your passphrase plus this salt. Re-running `init` is safe if the salt already exists; it does not rotate it.
+The wizard asks for the storage source (self-hosted or Git), connection settings,
+profile and optional SSH-agent unlock. It checks connectivity, asks for a new
+master passphrase twice on an empty vault or the existing master passphrase on an
+initialized vault, and creates the requested profile only when needed. Settings
+are saved together in `.sylva/config` after successful verification. Passwords
+and private-key contents are never written there. With the session agent enabled,
+setup also opens the session so normal `set` and `get` commands work immediately.
+See [the setup walkthrough](howto.md#first-time-setup-wizard).
+
+For scripts or the previous salt-only initialization behavior:
+
+```bash
+./bin/sylva init --non-interactive
+```
+
+Without a terminal, plain `init` also keeps the salt-only behavior; it never reads
+wizard answers from a pipe. That mode writes only the Argon2id salt if missing.
+It does not establish a master passphrase, create profiles, save settings or open
+an unlock session. Re-running either mode does not rotate an existing passphrase.
 
 If you lose the passphrase, ciphertext in SQLite cannot be recovered. Use
 `sylva backup <new-file>` for an encrypted archive and follow the

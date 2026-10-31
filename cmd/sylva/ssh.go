@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"github.com/osman/sylva/internal/config"
 	"github.com/osman/sylva/internal/crypto"
 	"github.com/osman/sylva/internal/sshunlock"
+	"golang.org/x/crypto/ssh"
 )
 
 func sshRegistration(cfg config.ClientConfig) (path, endpoint string) {
@@ -67,16 +69,7 @@ func registerSSH(cfg config.ClientConfig, publicKeyPath, path, endpoint string) 
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	file, err := os.Open(publicKeyPath)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	raw, err := io.ReadAll(io.LimitReader(file, 16*1024+1))
-	if err != nil {
-		return err
-	}
-	publicKey, err := sshunlock.ParsePublicKey(raw)
+	publicKey, err := readSSHUnlockPublicKey(publicKeyPath)
 	if err != nil {
 		return err
 	}
@@ -109,6 +102,28 @@ func registerSSH(cfg config.ClientConfig, publicKeyPath, path, endpoint string) 
 	if err != nil {
 		return err
 	}
+	if err := enrollVerifiedSSH(cfg, v, publicKey, path, endpoint); err != nil {
+		return err
+	}
+	fmt.Println("SSH unlock registered for this server on this device. Use sylva unlock --ssh.")
+	return nil
+}
+
+func readSSHUnlockPublicKey(path string) (ssh.PublicKey, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	raw, err := io.ReadAll(io.LimitReader(file, 16*1024+1))
+	if err != nil {
+		return nil, err
+	}
+	return sshunlock.ParsePublicKey(raw)
+}
+
+// The caller must authenticate the master passphrase before enrollment.
+func enrollVerifiedSSH(cfg config.ClientConfig, v *sylva.Vault, publicKey ssh.PublicKey, path, endpoint string) error {
 	key, err := v.CopyMasterKey()
 	if err != nil {
 		return err
@@ -119,10 +134,44 @@ func registerSSH(cfg config.ClientConfig, publicKeyPath, path, endpoint string) 
 		return err
 	}
 	defer connection.Close()
-	if err := sshunlock.Register(path, endpoint, publicKey, key, signer); err != nil {
+	return sshunlock.Register(path, endpoint, publicKey, key, signer)
+}
+
+// Setup can reuse a registration only after master-passphrase authentication,
+// proving agent access and checking that it unwraps the same verified vault key.
+// Explicit `ssh add` retains its refusal to replace an existing registration.
+func ensureVerifiedSSH(cfg config.ClientConfig, v *sylva.Vault, publicKey ssh.PublicKey, path, endpoint string) error {
+	fingerprint, err := sshunlock.Fingerprint(path, endpoint)
+	if errors.Is(err, os.ErrNotExist) {
+		if err := enrollVerifiedSSH(cfg, v, publicKey, path, endpoint); err != nil {
+			return fmt.Errorf("register SSH key (retry with sylva ssh add <public-key-file>): %w", err)
+		}
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read existing SSH registration (use sylva ssh remove before registering it again): %w", err)
+	}
+	if fingerprint != ssh.FingerprintSHA256(publicKey) {
+		return errors.New("SSH unlock already uses a different key; use sylva ssh remove before registering another key")
+	}
+	verifiedKey, err := v.CopyMasterKey()
+	if err != nil {
 		return err
 	}
-	fmt.Println("SSH unlock registered for this server on this device. Use sylva unlock --ssh.")
+	defer crypto.ZeroBytes(verifiedKey)
+	signer, connection, err := sshunlock.Connect(os.Getenv("SSH_AUTH_SOCK"), max(time.Minute, cfg.Timeout))
+	if err != nil {
+		return err
+	}
+	defer connection.Close()
+	registeredKey, err := sshunlock.Open(path, endpoint, signer)
+	if err != nil {
+		return fmt.Errorf("verify existing SSH unlock (check ssh-agent; re-register with sylva ssh remove and sylva ssh add if needed): %w", err)
+	}
+	defer crypto.ZeroBytes(registeredKey)
+	if subtle.ConstantTimeCompare(verifiedKey, registeredKey) != 1 {
+		return errors.New("existing SSH registration does not match the current vault key; re-register with sylva ssh remove and sylva ssh add <public-key-file>")
+	}
 	return nil
 }
 

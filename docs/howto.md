@@ -35,6 +35,62 @@ Restart the daemon after an update. See the
 [update procedure](mtls.md#add-tailscale-to-existing-certificates) for Docker
 recreation and validation requirements.
 
+## First-time setup wizard
+
+Run `sylva init` in a terminal. The wizard guides you through:
+
+1. **Storage source:** the existing self-hosted service or a Git repository.
+2. **Connection:** server URL and optional mTLS certificate paths, or Git remote
+   and branch. The Git repository should be private and empty or use a dedicated
+   Sylva branch; SSH transport needs a configured host key and loaded SSH key.
+3. **Profile:** keep `default`, select an existing profile, or enter a new name
+   such as `personal` or `work`. A missing profile is created after authentication.
+4. **Unlock method:** retain master-passphrase unlock and optionally register an
+   existing Ed25519 SSH-agent key using its `.pub` file path (press Enter to use
+   the shown path). Invalid files are prompted again. The matching private key
+   must be loaded in ssh-agent. Repeating setup reuses an existing registration
+   after verifying agent access and that it unlocks the current vault key. A
+   different key, stale registration or invalid file is never silently replaced;
+   use `sylva ssh remove` before registering another key.
+5. **Verification:** review the choices, confirm setup, then supply the master
+   passphrase. Empty vaults ask for a new passphrase and confirmation; initialized
+   vaults require their existing passphrase. The master passphrase is read with
+   terminal echo disabled. If `SYLVA_MASTER_PASSPHRASE` is explicitly configured,
+   that value is used instead of prompting.
+
+Setup connects to an existing service/repository; it does not start a daemon,
+create a hosted Git repository, accept unknown SSH host keys or generate/load
+SSH private keys. For mTLS, supply the CA and client files issued for that server.
+A Git setup leaves existing self-hosted TLS settings intact. Reconfiguration
+selects a source; it does not copy or migrate secrets between sources.
+
+Cancelling the review or failing connection/password verification leaves the
+local configuration unchanged. Successful verification creates any required
+vault metadata/profile and saves the selected connection and profile together
+with mode `0600`, preserving unrelated settings. Master passphrases and private
+key contents are not saved in this file. If a later optional SSH enrollment or
+session startup fails, the error reports that setup was saved and how to retry.
+
+A configured environment override takes precedence over saved configuration.
+The wizard refuses conflicting choices and names the variable to unset instead
+of saving choices that subsequent commands would ignore. Global `--server` and
+`--profile` flags seed wizard defaults; `--timeout` applies to its requests.
+
+With the default session agent enabled, setup finishes with the chosen profile
+active and the session unlocked. Daily use keeps its usual syntax:
+
+```bash
+sylva init
+sylva set github.com
+sylva get github.com
+```
+
+`init --wizard` explicitly requests the wizard and requires a terminal.
+`init --non-interactive` preserves the original salt-only initialization and
+never opens a wizard, even in a terminal. Plain `init` without a terminal also
+uses that mode, preserving existing automation. Redirected input never supplies
+wizard answers or a master passphrase. Invalid/extra init arguments are rejected.
+
 ## Daily use
 
 ```bash

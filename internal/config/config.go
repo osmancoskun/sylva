@@ -273,6 +273,10 @@ func LoadClientConfig(envPath string) (ClientConfig, error) {
 	if err != nil {
 		return ClientConfig{}, err
 	}
+	return clientFromSettings(s, envPath)
+}
+
+func clientFromSettings(s *settings, envPath string) (ClientConfig, error) {
 	profile, err := NormalizeProfileName(s.get("profile"))
 	if err != nil {
 		return ClientConfig{}, err

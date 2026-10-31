@@ -71,12 +71,12 @@ make build
 ./bin/sylvad
 ```
 
-In another terminal, from the same directory:
+In another terminal, from the same directory, run `init` for guided setup
+(source, profile, master passphrase and optional SSH unlock):
 
 ```bash
 ./bin/sylva ping
 ./bin/sylva init
-./bin/sylva unlock
 ./bin/sylva set
 ./bin/sylva set company.com
 ./bin/sylva set mail.company.com --inherit

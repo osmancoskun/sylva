@@ -162,7 +162,7 @@ def exercise(compose, env, directory):
             raise RuntimeError(f"{target} did not become ready: {ping.stdout}")
     print("PASS: bridge-network mTLS connectivity", flush=True)
 
-    cli("init")
+    cli("init", "--non-interactive")
     cli("set", "smoke-token", "synthetic-token", "password")
     cli("update", "smoke-token", "synthetic-updated", "password")
     cli("set", "company.example", "synthetic-domain", "domain")

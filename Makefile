@@ -78,7 +78,7 @@ docker-smoke:
 		if [ $$n -ge 20 ]; then echo "sylvad did not become ready"; exit 1; fi; \
 		sleep 0.3; \
 	done
-	$(DOCKER_COMPOSE) run --rm --no-deps sylva init
+	$(DOCKER_COMPOSE) run --rm --no-deps sylva init --non-interactive
 	$(DOCKER_COMPOSE) run --rm --no-deps sylva set company.com company-secret
 	$(DOCKER_COMPOSE) run --rm --no-deps sylva set mail.company.com --inherit
 	$(DOCKER_COMPOSE) run --rm --no-deps sylva get mail.company.com
