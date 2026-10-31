@@ -1,3 +1,5 @@
 option('release_version', type: 'string', value: '', description: 'Override the Git tag / VERSION build version')
 option('go', type: 'string', value: 'go', description: 'Go toolchain executable')
 option('offline', type: 'boolean', value: false, description: 'Build only with vendored modules and no network access')
+option('systemd_unit_dir', type: 'string', value: '', description: 'System systemd unit directory')
+option('sysusers_dir', type: 'string', value: '', description: 'systemd sysusers.d directory')

@@ -1,0 +1,35 @@
+[Unit]
+Description=Sylva encrypted vault server
+Documentation=https://github.com/osmancoskun/sylva
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=exec
+User=sylva
+Group=sylva
+StateDirectory=sylva
+StateDirectoryMode=0700
+WorkingDirectory=/var/lib/sylva
+Environment=SYLVA_LOCAL_CONFIG=@SYSCONFDIR@/sylva/sylvad.conf
+EnvironmentFile=-@SYSCONFDIR@/sysconfig/sylvad
+ExecStart=@BINDIR@/sylvad -env /dev/null
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=15s
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+
+[Install]
+WantedBy=multi-user.target

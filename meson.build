@@ -29,6 +29,23 @@ foreach binary : ['sylva', 'sylvad']
   )
 endforeach
 
+unit_dir = get_option('systemd_unit_dir')
+if unit_dir == ''
+  unit_dir = get_option('prefix') / 'lib/systemd/system'
+endif
+sysusers_dir = get_option('sysusers_dir')
+if sysusers_dir == ''
+  sysusers_dir = get_option('prefix') / 'lib/sysusers.d'
+endif
+service_conf = configuration_data()
+service_conf.set('BINDIR', get_option('prefix') / get_option('bindir'))
+service_conf.set('SYSCONFDIR', get_option('prefix') / get_option('sysconfdir'))
+configure_file(input: 'packaging/systemd/sylvad.service.in', output: 'sylvad.service',
+  configuration: service_conf, install_dir: unit_dir)
+install_data('packaging/systemd/sylva.sysusers', install_dir: sysusers_dir, rename: 'sylva.conf')
+install_data('packaging/sylvad.conf', install_dir: get_option('sysconfdir') / 'sylva', install_mode: 'rw-r-----')
+install_data('packaging/sylvad.env', install_dir: get_option('sysconfdir') / 'sysconfig', rename: 'sylvad', install_mode: 'rw-------')
+install_emptydir(get_option('localstatedir') / 'lib/sylva', install_mode: 'rwx------')
 install_data('LICENSE', install_dir: get_option('datadir') / 'licenses/sylva')
 install_data('README.md', install_dir: get_option('datadir') / 'doc/sylva')
 
