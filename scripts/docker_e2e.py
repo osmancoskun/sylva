@@ -224,7 +224,9 @@ def exercise(compose, env, directory):
     require(backup.read_bytes() == original, "Existing backup was overwritten")
     expect_failure("restore", "/artifacts/vault.backup", reason="uninitialized target vault")
 
-    rotate_passphrase([*compose, "run", "--rm", "--no-deps", "--no-tty=false",
+    # Compose v2 spells the long option --no-TTY; newer versions use --no-tty.
+    # The short option is stable across both and explicitly enables the PTY.
+    rotate_passphrase([*compose, "run", "--rm", "--no-deps", "-T=false",
                        "sylva", "passwd"], env)
     expect_failure("get", "smoke-token", "password", reason="incorrect master passphrase")
     for identifier, kind, value in entries:
